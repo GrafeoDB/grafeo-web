@@ -1,0 +1,99 @@
+{
+  "name": "@grafeo-db/web",
+  "version": "0.0.1",
+  "description": "Grafeo graph database in the browser - WebAssembly powered, zero backend",
+  "keywords": [
+    "grafeo",
+    "graph",
+    "database",
+    "wasm",
+    "webassembly",
+    "indexeddb",
+    "offline",
+    "gql",
+    "cypher",
+    "sparql",
+    "graphql",
+    "gremlin"
+  ],
+  "homepage": "https://github.com/GrafeoDB/grafeo-web",
+  "bugs": {
+    "url": "https://github.com/GrafeoDB/grafeo-web/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/GrafeoDB/grafeo-web.git"
+  },
+  "license": "Apache-2.0",
+  "author": "Grafeo Contributors",
+  "type": "module",
+  "exports": {
+    ".": {
+      "import": {
+        "types": "./dist/index.d.ts",
+        "default": "./dist/index.js"
+      },
+      "require": {
+        "types": "./dist/index.d.cts",
+        "default": "./dist/index.cjs"
+      }
+    },
+    "./lite": {
+      "import": {
+        "types": "./dist/lite.d.ts",
+        "default": "./dist/lite.js"
+      },
+      "require": {
+        "types": "./dist/lite.d.cts",
+        "default": "./dist/lite.cjs"
+      }
+    },
+    "./react": {
+      "import": {
+        "types": "./dist/react.d.ts",
+        "default": "./dist/react.js"
+      },
+      "require": {
+        "types": "./dist/react.d.cts",
+        "default": "./dist/react.cjs"
+      }
+    },
+    "./vue": {
+      "import": {
+        "types": "./dist/vue.d.ts",
+        "default": "./dist/vue.js"
+      },
+      "require": {
+        "types": "./dist/vue.d.cts",
+        "default": "./dist/vue.cjs"
+      }
+    },
+    "./svelte": {
+      "import": {
+        "types": "./dist/svelte.d.ts",
+        "default": "./dist/svelte.js"
+      },
+      "require": {
+        "types": "./dist/svelte.d.cts",
+        "default": "./dist/svelte.cjs"
+      }
+    }
+  },
+  "main": "./dist/index.cjs",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsup",
+    "prepublishOnly": "npm run build"
+  },
+  "devDependencies": {
+    "tsup": "^8.0.0",
+    "typescript": "^5.3.0"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}
