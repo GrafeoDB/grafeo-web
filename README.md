@@ -6,12 +6,12 @@ Zero backend. Your data stays on the client.
 
 ## Features
 
-- **Zero backend** — Grafeo runs entirely in the browser via WebAssembly
-- **Persistent storage** — IndexedDB keeps your data across sessions
-- **Non-blocking** — Web Worker execution keeps the UI responsive
-- **Full query support** — GQL, Cypher, SPARQL, GraphQL, Gremlin
-- **Framework integrations** — React, Vue, Svelte
-- **TypeScript-first** — Complete type definitions
+- **Zero backend**: Grafeo runs entirely in the browser via WebAssembly
+- **Persistent storage**: IndexedDB keeps your data across sessions
+- **Non-blocking**: Web Worker execution keeps the UI responsive
+- **Full query support**: GQL, Cypher, SPARQL, GraphQL, Gremlin
+- **Framework integrations**: React, Vue, Svelte
+- **TypeScript-first**: Complete type definitions
 
 ## Installation
 
@@ -249,8 +249,8 @@ For larger datasets, use [Grafeo](https://github.com/GrafeoDB/grafeo) server-sid
 
 | Package | Use Case |
 |---------|----------|
-| [`@grafeo-db/js`](https://www.npmjs.com/package/@grafeo/js) | Node.js, Deno, Edge runtimes |
-| [`@grafeo-db/wasm`](https://www.npmjs.com/package/@grafeo/wasm) | Raw WASM binary |
+| [`@grafeo-db/js`](https://www.npmjs.com/package/@grafeo-db/js) | Node.js, Deno, Edge runtimes |
+| [`@grafeo-db/wasm`](https://www.npmjs.com/package/@grafeo-db/wasm) | Raw WASM binary |
 | [`grafeo`](https://crates.io/crates/grafeo) | Rust crate |
 | [`grafeo`](https://pypi.org/project/grafeo/) | Python bindings |
 
