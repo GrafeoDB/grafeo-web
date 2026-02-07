@@ -1,4 +1,4 @@
-# @grafeo-db/web
+# PLACEHOLDER README, NOT YET IMPLEMENTED
 
 [Grafeo](https://github.com/GrafeoDB/grafeo) graph database in the browser.
 
