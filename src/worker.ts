@@ -9,6 +9,11 @@ import init, { Database } from '@grafeo-db/wasm';
 import { PersistenceManager } from './persistence';
 import type { WorkerRequest, WorkerResponse } from './types';
 
+/** Detects queries that mutate the graph (INSERT, CREATE, DELETE, etc). */
+function isMutatingQuery(query: string): boolean {
+  return /^\s*(INSERT|CREATE|DELETE|REMOVE|SET|MERGE|DROP)\b/i.test(query);
+}
+
 let db: Database | null = null;
 let persistence: PersistenceManager | null = null;
 
@@ -49,9 +54,10 @@ async function handleMessage(request: WorkerRequest): Promise<void> {
 
       case 'execute': {
         if (!db) throw new Error('Database not initialized');
-        const result = db.execute(args[0] as string);
+        const query = args[0] as string;
+        const result = db.execute(query);
 
-        if (persistence) {
+        if (persistence && isMutatingQuery(query)) {
           persistence.scheduleSave(() => db!.exportSnapshot());
         }
 
@@ -61,9 +67,10 @@ async function handleMessage(request: WorkerRequest): Promise<void> {
 
       case 'executeRaw': {
         if (!db) throw new Error('Database not initialized');
-        const result = db.executeRaw(args[0] as string);
+        const query = args[0] as string;
+        const result = db.executeRaw(query);
 
-        if (persistence) {
+        if (persistence && isMutatingQuery(query)) {
           persistence.scheduleSave(() => db!.exportSnapshot());
         }
 

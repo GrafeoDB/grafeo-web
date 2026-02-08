@@ -1,6 +1,7 @@
-import init, { Database as WasmDatabase } from '@grafeo-db/wasm';
+import { Database as WasmDatabase } from '@grafeo-db/wasm';
 
 import { PersistenceManager } from './persistence';
+import { ensureWasmInitialized } from './wasm-init';
 import { WorkerProxy } from './worker-proxy';
 import type {
   Change,
@@ -22,13 +23,9 @@ export type {
   StorageStats,
 };
 
-let wasmInitialized = false;
-
-async function ensureWasmInitialized(): Promise<void> {
-  if (!wasmInitialized) {
-    await init();
-    wasmInitialized = true;
-  }
+/** Detects queries that mutate the graph (INSERT, CREATE, DELETE, etc). */
+function isMutatingQuery(query: string): boolean {
+  return /^\s*(INSERT|CREATE|DELETE|REMOVE|SET|MERGE|DROP)\b/i.test(query);
 }
 
 /**
@@ -60,6 +57,11 @@ export class GrafeoDB {
     this.wasm = wasm;
     this.persistence = persistence;
     this.proxy = proxy;
+  }
+
+  /** Returns the Grafeo WASM engine version. */
+  static version(): string {
+    return WasmDatabase.version();
   }
 
   /**
@@ -99,6 +101,11 @@ export class GrafeoDB {
     return new GrafeoDB(null, null, proxy);
   }
 
+  /** Whether the database is still open and usable. */
+  get isOpen(): boolean {
+    return !this.closed;
+  }
+
   /**
    * Executes a query and returns results as an array of objects.
    *
@@ -120,7 +127,7 @@ export class GrafeoDB {
     void options?.language;
     const result = this.wasm!.execute(query);
 
-    if (this.persistence) {
+    if (this.persistence && isMutatingQuery(query)) {
       this.persistence.scheduleSave(() => this.wasm!.exportSnapshot());
     }
 
@@ -142,7 +149,7 @@ export class GrafeoDB {
 
     const result = this.wasm!.executeRaw(query);
 
-    if (this.persistence) {
+    if (this.persistence && isMutatingQuery(query)) {
       this.persistence.scheduleSave(() => this.wasm!.exportSnapshot());
     }
 
