@@ -113,6 +113,7 @@
   },
   "devDependencies": {
     "@types/react": "^19.2.13",
+    "fake-indexeddb": "^6.2.5",
     "happy-dom": "^17.0.0",
     "svelte": "^5.50.0",
     "tsup": "^8.0.0",
