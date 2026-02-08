@@ -49,18 +49,21 @@ export class GrafeoDB {
   static async create(options?: CreateOptions): Promise<GrafeoDB> {
     // TODO: When a lite WASM binary exists, import from '@grafeo-db/wasm/lite'
     await ensureWasmInitialized();
-    const wasm = new WasmDatabase();
 
     let persistence: PersistenceManager | null = null;
+    let wasm: WasmDatabase;
+
     if (options?.persist) {
       persistence = new PersistenceManager(
         options.persist,
         options.persistInterval,
       );
       const snapshot = await persistence.load();
-      if (snapshot) {
-        wasm.importSnapshot(snapshot);
-      }
+      wasm = snapshot
+        ? WasmDatabase.importSnapshot(snapshot)
+        : new WasmDatabase();
+    } else {
+      wasm = new WasmDatabase();
     }
 
     return new GrafeoDB(wasm, persistence);
@@ -107,6 +110,12 @@ export class GrafeoDB {
     return this.wasm!.edgeCount();
   }
 
+  /** Returns schema information (labels, edge types, property keys). */
+  async schema(): Promise<unknown> {
+    this.assertOpen();
+    return this.wasm!.schema();
+  }
+
   /** Returns IndexedDB storage usage statistics. */
   async storageStats(): Promise<StorageStats> {
     this.assertOpen();
@@ -126,7 +135,8 @@ export class GrafeoDB {
   /** Restores the database from a previously exported snapshot. */
   async import(snapshot: DatabaseSnapshot): Promise<void> {
     this.assertOpen();
-    this.wasm!.importSnapshot(snapshot.data);
+    this.wasm!.free();
+    this.wasm = WasmDatabase.importSnapshot(snapshot.data);
     if (this.persistence) {
       this.persistence.scheduleSave(() => this.wasm!.exportSnapshot());
     }

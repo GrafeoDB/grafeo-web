@@ -2,6 +2,7 @@
  * Mock for @grafeo-db/wasm used in tests.
  *
  * Simulates a basic in-memory graph database with INSERT/MATCH support.
+ * Matches the WASM 0.4.3 API surface.
  */
 
 interface Node {
@@ -58,6 +59,21 @@ export class Database {
     return { columns, rows, executionTimeMs: 0.1 };
   }
 
+  executeWithLanguage(
+    query: string,
+    language: string,
+  ): Record<string, unknown>[] {
+    this.assertNotFreed();
+    const supported = ['gql', 'cypher', 'sparql', 'gremlin', 'graphql'];
+    if (!supported.includes(language)) {
+      throw new Error(
+        `Unknown query language: '${language}'. Supported: ${supported.join(', ')}`,
+      );
+    }
+    // In the mock, all languages delegate to the same GQL-like parser
+    return this.execute(query);
+  }
+
   nodeCount(): number {
     this.assertNotFreed();
     return this.nodes.length;
@@ -68,8 +84,18 @@ export class Database {
     return this.edges.length;
   }
 
+  schema(): unknown {
+    this.assertNotFreed();
+    const labels = [...new Set(this.nodes.flatMap((n) => n.labels))];
+    const edgeTypes = [...new Set(this.edges.map((e) => e.type))];
+    const propertyKeys = [
+      ...new Set(this.nodes.flatMap((n) => Object.keys(n.properties))),
+    ];
+    return { lpg: { labels, edgeTypes, propertyKeys } };
+  }
+
   static version(): string {
-    return '0.4.2-mock';
+    return '0.4.3-mock';
   }
 
   exportSnapshot(): Uint8Array {
@@ -78,12 +104,13 @@ export class Database {
     return new TextEncoder().encode(data);
   }
 
-  importSnapshot(data: Uint8Array): void {
-    this.assertNotFreed();
+  static importSnapshot(data: Uint8Array): Database {
     const json = new TextDecoder().decode(data);
     const parsed = JSON.parse(json) as { nodes: Node[]; edges: Edge[] };
-    this.nodes = parsed.nodes;
-    this.edges = parsed.edges;
+    const db = new Database();
+    db.nodes = parsed.nodes;
+    db.edges = parsed.edges;
+    return db;
   }
 
   free(): void {

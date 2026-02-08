@@ -72,18 +72,21 @@ export class GrafeoDB {
     }
 
     await ensureWasmInitialized();
-    const wasm = new WasmDatabase();
 
     let persistence: PersistenceManager | null = null;
+    let wasm: WasmDatabase;
+
     if (options?.persist) {
       persistence = new PersistenceManager(
         options.persist,
         options.persistInterval,
       );
       const snapshot = await persistence.load();
-      if (snapshot) {
-        wasm.importSnapshot(snapshot);
-      }
+      wasm = snapshot
+        ? WasmDatabase.importSnapshot(snapshot)
+        : new WasmDatabase();
+    } else {
+      wasm = new WasmDatabase();
     }
 
     return new GrafeoDB(wasm, persistence, null);
@@ -119,9 +122,10 @@ export class GrafeoDB {
       return this.proxy.execute(query, options);
     }
 
-    // TODO: When executeWithLanguage() is added to WASM, route based on options.language
-    void options?.language;
-    const result = this.wasm!.execute(query);
+    const lang = options?.language;
+    const result = lang && lang !== 'gql'
+      ? this.wasm!.executeWithLanguage(query, lang)
+      : this.wasm!.execute(query);
 
     if (this.persistence && isMutatingQuery(query)) {
       this.persistence.scheduleSave(() => this.wasm!.exportSnapshot());
@@ -170,6 +174,15 @@ export class GrafeoDB {
     return this.wasm!.edgeCount();
   }
 
+  /** Returns schema information (labels, edge types, property keys). */
+  async schema(): Promise<unknown> {
+    this.assertOpen();
+    if (this.proxy) {
+      return this.proxy.schema();
+    }
+    return this.wasm!.schema();
+  }
+
   /** Returns IndexedDB storage usage statistics. */
   async storageStats(): Promise<StorageStats> {
     this.assertOpen();
@@ -202,7 +215,8 @@ export class GrafeoDB {
     if (this.proxy) {
       return this.proxy.import(snapshot);
     }
-    this.wasm!.importSnapshot(snapshot.data);
+    this.wasm!.free();
+    this.wasm = WasmDatabase.importSnapshot(snapshot.data);
     if (this.persistence) {
       this.persistence.scheduleSave(() => this.wasm!.exportSnapshot());
     }
