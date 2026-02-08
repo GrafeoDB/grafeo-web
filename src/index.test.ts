@@ -4,9 +4,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 vi.mock('@grafeo-db/wasm', () => import('./__mocks__/wasm'));
 
 const { GrafeoDB } = await import('./index');
+type GrafeoDBInstance = Awaited<ReturnType<typeof GrafeoDB.create>>;
 
 describe('GrafeoDB', () => {
-  let db: InstanceType<typeof GrafeoDB>;
+  let db: GrafeoDBInstance;
 
   beforeEach(async () => {
     db = await GrafeoDB.create();
