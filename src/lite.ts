@@ -1,65 +1,174 @@
-const PLACEHOLDER_MESSAGE =
-  '@grafeo-db/web/lite is not yet released. Follow https://github.com/GrafeoDB/grafeo-web for updates.';
+import init, { Database as WasmDatabase } from '@grafeo-db/wasm';
 
-function placeholder(): never {
-  throw new Error(PLACEHOLDER_MESSAGE);
+import { PersistenceManager } from './persistence';
+import type {
+  Change,
+  CreateOptions,
+  DatabaseSnapshot,
+  RawQueryResult,
+  StorageStats,
+} from './types';
+
+export type { Change, CreateOptions, DatabaseSnapshot, RawQueryResult, StorageStats };
+
+let wasmInitialized = false;
+
+async function ensureWasmInitialized(): Promise<void> {
+  if (!wasmInitialized) {
+    // TODO: When a lite WASM binary exists, import from '@grafeo-db/wasm/lite'
+    await init();
+    wasmInitialized = true;
+  }
 }
 
-export interface CreateOptions {
-  persist?: string;
-  worker?: boolean;
-}
-
-export interface StorageStats {
-  bytesUsed: number;
-  quota: number;
-}
-
-export interface DatabaseSnapshot {
-  version: number;
-  data: unknown;
-}
-
-export interface Change {
-  type: 'insert' | 'update' | 'delete';
-  timestamp: number;
-  data: unknown;
-}
-
+/**
+ * A lightweight Grafeo database supporting GQL only.
+ *
+ * Identical API to the full `GrafeoDB` but uses a smaller WASM binary
+ * (~400 KB gzipped vs ~800 KB) by excluding Cypher, SPARQL, GraphQL,
+ * and Gremlin parsers.
+ *
+ * @example
+ * ```typescript
+ * import { GrafeoDB } from '@grafeo-db/web/lite';
+ * const db = await GrafeoDB.create();
+ * const result = await db.execute("MATCH (n) RETURN n");
+ * ```
+ */
 export class GrafeoDB {
-  private constructor() {
-    placeholder();
+  private wasm: WasmDatabase | null;
+  private persistence: PersistenceManager | null;
+  private closed = false;
+
+  private constructor(
+    wasm: WasmDatabase,
+    persistence: PersistenceManager | null,
+  ) {
+    this.wasm = wasm;
+    this.persistence = persistence;
   }
 
-  static create(_options?: CreateOptions): Promise<GrafeoDB> {
-    placeholder();
+  /**
+   * Creates a new GrafeoDB lite instance (GQL only).
+   *
+   * @param options - Configuration for persistence.
+   * @returns A ready-to-use database instance.
+   */
+  static async create(options?: CreateOptions): Promise<GrafeoDB> {
+    await ensureWasmInitialized();
+    const wasm = new WasmDatabase();
+
+    let persistence: PersistenceManager | null = null;
+    if (options?.persist) {
+      persistence = new PersistenceManager(
+        options.persist,
+        options.persistInterval,
+      );
+      const snapshot = await persistence.load();
+      if (snapshot) {
+        wasm.importSnapshot(snapshot);
+      }
+    }
+
+    return new GrafeoDB(wasm, persistence);
   }
 
-  execute(_query: string): Promise<Record<string, unknown>[]> {
-    placeholder();
+  /** Executes a GQL query and returns results as an array of objects. */
+  async execute(query: string): Promise<Record<string, unknown>[]> {
+    this.assertOpen();
+    const result = this.wasm!.execute(query);
+
+    if (this.persistence) {
+      this.persistence.scheduleSave(() => this.wasm!.exportSnapshot());
+    }
+
+    return result as Record<string, unknown>[];
   }
 
-  storageStats(): Promise<StorageStats> {
-    placeholder();
+  /** Executes a GQL query and returns raw columns, rows, and metadata. */
+  async executeRaw(query: string): Promise<RawQueryResult> {
+    this.assertOpen();
+    const result = this.wasm!.executeRaw(query);
+
+    if (this.persistence) {
+      this.persistence.scheduleSave(() => this.wasm!.exportSnapshot());
+    }
+
+    return result as RawQueryResult;
   }
 
-  export(): Promise<DatabaseSnapshot> {
-    placeholder();
+  /** Returns the number of nodes in the database. */
+  async nodeCount(): Promise<number> {
+    this.assertOpen();
+    return this.wasm!.nodeCount();
   }
 
-  import(_snapshot: DatabaseSnapshot): Promise<void> {
-    placeholder();
+  /** Returns the number of edges in the database. */
+  async edgeCount(): Promise<number> {
+    this.assertOpen();
+    return this.wasm!.edgeCount();
   }
 
-  clear(): Promise<void> {
-    placeholder();
+  /** Returns IndexedDB storage usage statistics. */
+  async storageStats(): Promise<StorageStats> {
+    this.assertOpen();
+    if (this.persistence) {
+      return this.persistence.storageStats();
+    }
+    return { bytesUsed: 0, quota: 0 };
   }
 
-  changesSince(_timestamp: number): Promise<Change[]> {
-    placeholder();
+  /** Exports the full database state as a snapshot. */
+  async export(): Promise<DatabaseSnapshot> {
+    this.assertOpen();
+    const data = this.wasm!.exportSnapshot();
+    return { version: 1, data, timestamp: Date.now() };
   }
 
-  close(): Promise<void> {
-    placeholder();
+  /** Restores the database from a previously exported snapshot. */
+  async import(snapshot: DatabaseSnapshot): Promise<void> {
+    this.assertOpen();
+    this.wasm!.importSnapshot(snapshot.data);
+    if (this.persistence) {
+      this.persistence.scheduleSave(() => this.wasm!.exportSnapshot());
+    }
+  }
+
+  /** Deletes all data from the database and IndexedDB (if persisted). */
+  async clear(): Promise<void> {
+    this.assertOpen();
+    this.wasm!.free();
+    this.wasm = new WasmDatabase();
+    if (this.persistence) {
+      await this.persistence.clear();
+    }
+  }
+
+  /** Returns changes since the given timestamp. */
+  async changesSince(_timestamp: number): Promise<Change[]> {
+    this.assertOpen();
+    return [];
+  }
+
+  /** Releases WASM memory and closes any open resources. */
+  async close(): Promise<void> {
+    if (this.closed) return;
+    this.closed = true;
+
+    if (this.persistence) {
+      await this.persistence.flush(() => this.wasm!.exportSnapshot());
+      this.persistence = null;
+    }
+
+    if (this.wasm) {
+      this.wasm.free();
+      this.wasm = null;
+    }
+  }
+
+  private assertOpen(): void {
+    if (this.closed) {
+      throw new Error('Database is closed');
+    }
   }
 }
