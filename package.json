@@ -93,7 +93,7 @@
     "prepublishOnly": "npm run build"
   },
   "dependencies": {
-    "@grafeo-db/wasm": "^0.4.2"
+    "@grafeo-db/wasm": "file:../grafeo/crates/bindings/wasm/pkg"
   },
   "peerDependencies": {
     "react": ">=18",
