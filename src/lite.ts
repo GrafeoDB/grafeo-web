@@ -1,6 +1,7 @@
 import { Database as WasmDatabase } from '@grafeo-db/wasm';
 
 import { PersistenceManager } from './persistence';
+import { isMutatingQuery } from './query-utils';
 import { ensureWasmInitialized } from './wasm-init';
 import type {
   Change,
@@ -11,11 +12,6 @@ import type {
 } from './types';
 
 export type { Change, CreateOptions, DatabaseSnapshot, RawQueryResult, StorageStats };
-
-/** Detects queries that mutate the graph (INSERT, CREATE, DELETE, etc). */
-function isMutatingQuery(query: string): boolean {
-  return /^\s*(INSERT|CREATE|DELETE|REMOVE|SET|MERGE|DROP)\b/i.test(query);
-}
 
 /**
  * A lightweight Grafeo database supporting GQL only.
