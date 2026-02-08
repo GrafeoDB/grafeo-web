@@ -44,10 +44,16 @@ export class PersistenceManager {
   private interval: number;
   private timer: ReturnType<typeof setTimeout> | null = null;
   private dirty = false;
+  private onError: (error: Error) => void;
 
-  constructor(key: string, interval?: number) {
+  constructor(
+    key: string,
+    interval?: number,
+    onError?: (error: Error) => void,
+  ) {
     this.key = key;
     this.interval = interval ?? DEFAULT_PERSIST_INTERVAL;
+    this.onError = onError ?? ((err) => console.error('[grafeo-web] persistence error:', err));
   }
 
   /** Load a previously persisted snapshot. Returns null if none exists. */
@@ -97,8 +103,12 @@ export class PersistenceManager {
       this.timer = null;
       if (this.dirty) {
         this.dirty = false;
-        const snapshot = getSnapshot();
-        await this.save(snapshot);
+        try {
+          const snapshot = getSnapshot();
+          await this.save(snapshot);
+        } catch (err) {
+          this.onError(err instanceof Error ? err : new Error(String(err)));
+        }
       }
     }, this.interval);
   }
