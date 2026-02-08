@@ -1,6 +1,7 @@
-import init, { Database as WasmDatabase } from '@grafeo-db/wasm';
+import { Database as WasmDatabase } from '@grafeo-db/wasm';
 
 import { PersistenceManager } from './persistence';
+import { ensureWasmInitialized } from './wasm-init';
 import type {
   Change,
   CreateOptions,
@@ -11,14 +12,9 @@ import type {
 
 export type { Change, CreateOptions, DatabaseSnapshot, RawQueryResult, StorageStats };
 
-let wasmInitialized = false;
-
-async function ensureWasmInitialized(): Promise<void> {
-  if (!wasmInitialized) {
-    // TODO: When a lite WASM binary exists, import from '@grafeo-db/wasm/lite'
-    await init();
-    wasmInitialized = true;
-  }
+/** Detects queries that mutate the graph (INSERT, CREATE, DELETE, etc). */
+function isMutatingQuery(query: string): boolean {
+  return /^\s*(INSERT|CREATE|DELETE|REMOVE|SET|MERGE|DROP)\b/i.test(query);
 }
 
 /**
@@ -55,6 +51,7 @@ export class GrafeoDB {
    * @returns A ready-to-use database instance.
    */
   static async create(options?: CreateOptions): Promise<GrafeoDB> {
+    // TODO: When a lite WASM binary exists, import from '@grafeo-db/wasm/lite'
     await ensureWasmInitialized();
     const wasm = new WasmDatabase();
 
@@ -73,12 +70,17 @@ export class GrafeoDB {
     return new GrafeoDB(wasm, persistence);
   }
 
+  /** Whether the database is still open and usable. */
+  get isOpen(): boolean {
+    return !this.closed;
+  }
+
   /** Executes a GQL query and returns results as an array of objects. */
   async execute(query: string): Promise<Record<string, unknown>[]> {
     this.assertOpen();
     const result = this.wasm!.execute(query);
 
-    if (this.persistence) {
+    if (this.persistence && isMutatingQuery(query)) {
       this.persistence.scheduleSave(() => this.wasm!.exportSnapshot());
     }
 
@@ -90,7 +92,7 @@ export class GrafeoDB {
     this.assertOpen();
     const result = this.wasm!.executeRaw(query);
 
-    if (this.persistence) {
+    if (this.persistence && isMutatingQuery(query)) {
       this.persistence.scheduleSave(() => this.wasm!.exportSnapshot());
     }
 
