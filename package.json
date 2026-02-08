@@ -87,11 +87,39 @@
   ],
   "scripts": {
     "build": "tsup",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "typecheck": "tsc --noEmit",
     "prepublishOnly": "npm run build"
   },
+  "dependencies": {
+    "@grafeo-db/wasm": "file:../grafeo/crates/bindings/wasm/pkg"
+  },
+  "peerDependencies": {
+    "react": ">=18",
+    "svelte": ">=3",
+    "vue": ">=3"
+  },
+  "peerDependenciesMeta": {
+    "react": {
+      "optional": true
+    },
+    "svelte": {
+      "optional": true
+    },
+    "vue": {
+      "optional": true
+    }
+  },
   "devDependencies": {
+    "@types/react": "^19.2.13",
+    "fake-indexeddb": "^6.2.5",
+    "happy-dom": "^17.0.0",
+    "svelte": "^5.50.0",
     "tsup": "^8.0.0",
-    "typescript": "^5.3.0"
+    "typescript": "^5.3.0",
+    "vitest": "^3.0.0",
+    "vue": "^3.5.27"
   },
   "engines": {
     "node": ">=18"
