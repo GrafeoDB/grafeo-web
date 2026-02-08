@@ -9,7 +9,7 @@ Zero backend. Your data stays on the client.
 - **Zero backend**: Grafeo runs entirely in the browser via WebAssembly
 - **Persistent storage**: IndexedDB keeps your data across sessions
 - **Non-blocking**: Web Worker execution keeps the UI responsive
-- **GQL query support**: Full GQL query language
+- **Multi-language queries**: GQL, Cypher, SPARQL, Gremlin, GraphQL
 - **Framework integrations**: React, Vue, Svelte
 - **TypeScript-first**: Complete type definitions
 
@@ -51,7 +51,7 @@ for (const row of result) {
 }
 
 // Check version
-console.log(GrafeoDB.version()); // e.g. "0.4.2"
+console.log(GrafeoDB.version()); // e.g. "0.4.3"
 
 // Cleanup
 await db.close();

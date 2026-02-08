@@ -100,6 +100,10 @@ export class WorkerProxy {
     return (await this.send('edgeCount')) as number;
   }
 
+  async schema(): Promise<unknown> {
+    return this.send('schema');
+  }
+
   async storageStats(): Promise<StorageStats> {
     return (await this.send('storageStats')) as StorageStats;
   }

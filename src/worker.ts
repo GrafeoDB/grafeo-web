@@ -30,7 +30,6 @@ async function handleMessage(request: WorkerRequest): Promise<void> {
     switch (method) {
       case 'init': {
         await init();
-        db = new Database();
 
         const options = args[0] as { persist?: string; persistInterval?: number } | undefined;
         if (options?.persist) {
@@ -39,9 +38,11 @@ async function handleMessage(request: WorkerRequest): Promise<void> {
             options.persistInterval,
           );
           const snapshot = await persistence.load();
-          if (snapshot) {
-            db.importSnapshot(snapshot);
-          }
+          db = snapshot
+            ? Database.importSnapshot(snapshot)
+            : new Database();
+        } else {
+          db = new Database();
         }
 
         respond(id, true);
@@ -51,7 +52,11 @@ async function handleMessage(request: WorkerRequest): Promise<void> {
       case 'execute': {
         if (!db) throw new Error('Database not initialized');
         const query = args[0] as string;
-        const result = db.execute(query);
+        const options = args[1] as { language?: string } | undefined;
+        const lang = options?.language;
+        const result = lang && lang !== 'gql'
+          ? db.executeWithLanguage(query, lang)
+          : db.execute(query);
 
         if (persistence && isMutatingQuery(query)) {
           persistence.scheduleSave(() => db!.exportSnapshot());
@@ -96,13 +101,20 @@ async function handleMessage(request: WorkerRequest): Promise<void> {
       case 'import': {
         if (!db) throw new Error('Database not initialized');
         const snapshot = args[0] as { data: Uint8Array };
-        db.importSnapshot(snapshot.data);
+        db.free();
+        db = Database.importSnapshot(snapshot.data);
 
         if (persistence) {
           persistence.scheduleSave(() => db!.exportSnapshot());
         }
 
         respond(id);
+        break;
+      }
+
+      case 'schema': {
+        if (!db) throw new Error('Database not initialized');
+        respond(id, db.schema());
         break;
       }
 

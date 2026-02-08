@@ -2,6 +2,22 @@
 
 All notable changes to `@grafeo-db/web`.
 
+## [0.2.0] - 2026-02-08
+
+_Upgrade to Grafeo WASM 0.4.3 — Full API Support_
+
+### Added
+
+- **Multi-language query support**: `execute(query, { language: 'cypher' })` now routes to `executeWithLanguage()` in the WASM engine. Supported: `gql`, `cypher`, `sparql`, `gremlin`, `graphql`
+- **`db.schema()`**: returns schema information (labels, edge types, property keys) from the WASM engine
+- **Real snapshot persistence**: `exportSnapshot()` and `importSnapshot()` are now backed by the Rust implementation (previously were stubs)
+
+### Changed
+
+- **WASM 0.4.3**: upgraded from 0.4.2 — includes `executeWithLanguage`, `exportSnapshot`/`importSnapshot`, and `schema`
+- **`importSnapshot` is now static**: creates a new `Database` instance from snapshot bytes (was an instance method). This changes the internal persistence restore and `import()` flows
+- Mock updated to match 0.4.3 API surface (`executeWithLanguage`, `schema`, static `importSnapshot`)
+
 ## [0.1.3] - 2026-02-08
 
 _Test Coverage & Code Cleanup_
