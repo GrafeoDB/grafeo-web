@@ -7,12 +7,8 @@
 import init, { Database } from '@grafeo-db/wasm';
 
 import { PersistenceManager } from './persistence';
+import { isMutatingQuery } from './query-utils';
 import type { WorkerRequest, WorkerResponse } from './types';
-
-/** Detects queries that mutate the graph (INSERT, CREATE, DELETE, etc). */
-function isMutatingQuery(query: string): boolean {
-  return /^\s*(INSERT|CREATE|DELETE|REMOVE|SET|MERGE|DROP)\b/i.test(query);
-}
 
 let db: Database | null = null;
 let persistence: PersistenceManager | null = null;

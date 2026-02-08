@@ -2,6 +2,22 @@
 
 All notable changes to `@grafeo-db/web`.
 
+## [0.1.3] - 2026-02-08
+
+_Test Coverage & Code Cleanup_
+
+### Added
+
+- **Svelte store tests** (`src/svelte.test.ts`): 6 tests covering store lifecycle, subscriber notifications, auto-close, manual close, and error handling
+- **Vue composable tests** (`src/vue.test.ts`): 7 tests covering `useGrafeo()` lifecycle, unmount cleanup, error handling, `useQuery()` execution, and refetch
+- **React hook tests** (`src/react.test.ts`): 6 tests covering `useGrafeo()` lifecycle, unmount cleanup, error handling, `useQuery()` execution
+- **Worker proxy tests** (`src/worker-proxy.test.ts`): 9 tests covering init, execute, executeRaw, nodeCount/edgeCount, close, error responses, and worker crash handling
+
+### Changed
+
+- Extracted `isMutatingQuery()` to shared `src/query-utils.ts` (was duplicated in index.ts, lite.ts, worker.ts)
+- Test count: 63 total (up from 35)
+
 ## [0.1.2] - 2026-02-08
 
 _Bug Fixes & Robustness_

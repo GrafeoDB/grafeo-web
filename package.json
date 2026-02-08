@@ -1,6 +1,6 @@
 {
   "name": "@grafeo-db/web",
-  "version": "0.1.2",
+  "version": "0.1.3",
   "description": "Grafeo graph database in the browser - WebAssembly powered, zero backend",
   "keywords": [
     "grafeo",
@@ -113,8 +113,11 @@
   },
   "devDependencies": {
     "@types/react": "^19.2.13",
+    "@types/react-dom": "^19.2.3",
     "fake-indexeddb": "^6.2.5",
     "happy-dom": "^17.0.0",
+    "react": "^19.2.4",
+    "react-dom": "^19.2.4",
     "svelte": "^5.50.0",
     "tsup": "^8.0.0",
     "typescript": "^5.3.0",
