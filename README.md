@@ -1,4 +1,4 @@
-# PLACEHOLDER README, NOT YET IMPLEMENTED
+# @grafeo-db/web
 
 [Grafeo](https://github.com/GrafeoDB/grafeo) graph database in the browser.
 
@@ -9,7 +9,7 @@ Zero backend. Your data stays on the client.
 - **Zero backend**: Grafeo runs entirely in the browser via WebAssembly
 - **Persistent storage**: IndexedDB keeps your data across sessions
 - **Non-blocking**: Web Worker execution keeps the UI responsive
-- **Full query support**: GQL, Cypher, SPARQL, GraphQL, Gremlin
+- **GQL query support**: Full GQL query language
 - **Framework integrations**: React, Vue, Svelte
 - **TypeScript-first**: Complete type definitions
 
@@ -18,6 +18,8 @@ Zero backend. Your data stays on the client.
 ```bash
 npm install @grafeo-db/web
 ```
+
+> **Note**: `@grafeo-db/wasm` is not yet published to npm. For now, link it locally from the [grafeo](https://github.com/GrafeoDB/grafeo) repo.
 
 ## Quick Start
 
@@ -28,9 +30,7 @@ import { GrafeoDB } from '@grafeo-db/web';
 const db = await GrafeoDB.create();
 
 // Or persist to IndexedDB
-const db = await GrafeoDB.create({ 
-  persist: 'my-database' 
-});
+const db = await GrafeoDB.create({ persist: 'my-database' });
 
 // Create data
 await db.execute(`INSERT (:Person {name: 'Alice', age: 30})`);
@@ -49,6 +49,42 @@ const result = await db.execute(`
 for (const row of result) {
   console.log(`${row['p.name']} knows ${row['friend.name']}`);
 }
+
+// Check version
+console.log(GrafeoDB.version()); // e.g. "0.4.2"
+
+// Cleanup
+await db.close();
+```
+
+## API
+
+### `GrafeoDB`
+
+| Method | Description |
+|--------|-------------|
+| `GrafeoDB.create(options?)` | Create a database instance |
+| `GrafeoDB.version()` | Get the WASM engine version |
+| `db.execute(query, options?)` | Execute a GQL query, returns `Record<string, unknown>[]` |
+| `db.executeRaw(query)` | Execute a query, returns columns + rows + timing |
+| `db.nodeCount()` | Number of nodes |
+| `db.edgeCount()` | Number of edges |
+| `db.export()` | Export full database as a snapshot |
+| `db.import(snapshot)` | Restore from a snapshot |
+| `db.clear()` | Delete all data |
+| `db.storageStats()` | IndexedDB usage and quota |
+| `db.changesSince(timestamp)` | Changes since timestamp (pending WASM support) |
+| `db.isOpen` | Whether the database is still open |
+| `db.close()` | Release WASM memory and cleanup |
+
+### `CreateOptions`
+
+```typescript
+{
+  persist?: string;          // IndexedDB key for persistence
+  worker?: boolean;          // Run WASM in a Web Worker
+  persistInterval?: number;  // Debounce interval in ms (default: 1000)
+}
 ```
 
 ## Persistence
@@ -63,8 +99,10 @@ await db.execute(`INSERT (:User {name: 'Alice'})`);
 // Later visit - data is still there
 const db = await GrafeoDB.create({ persist: 'my-app' });
 const result = await db.execute(`MATCH (u:User) RETURN u.name`);
-// → [{ 'u.name': 'Alice' }]
+// -> [{ 'u.name': 'Alice' }]
 ```
+
+Persistence only triggers on mutating queries (INSERT, CREATE, DELETE, etc.), not on reads.
 
 ### Storage Management
 
@@ -75,11 +113,10 @@ console.log(`Using ${stats.bytesUsed} of ${stats.quota} bytes`);
 
 // Export database
 const snapshot = await db.export();
-localStorage.setItem('backup', JSON.stringify(snapshot));
 
-// Import database
-const backup = JSON.parse(localStorage.getItem('backup'));
-await db.import(backup);
+// Import into another database
+const db2 = await GrafeoDB.create();
+await db2.import(snapshot);
 
 // Clear all data
 await db.clear();
@@ -90,45 +127,44 @@ await db.clear();
 For large databases or complex queries, run in a Web Worker:
 
 ```typescript
-import { GrafeoDB } from '@grafeo-db/web';
-
 const db = await GrafeoDB.create({
   worker: true,
-  persist: 'large-database'
+  persist: 'large-database',
 });
 
-// Queries run in background thread
-// UI stays responsive
-const result = await db.execute(`
-  MATCH (a)-[*1..5]->(b) 
-  RETURN count(*)
-`);
+// Queries run in background thread — UI stays responsive
+const result = await db.execute(`MATCH (a)-[*1..5]->(b) RETURN count(*)`);
 ```
 
 ## Framework Integrations
 
 ### React
 
-```typescript
+```tsx
 import { useGrafeo, useQuery } from '@grafeo-db/web/react';
 
 function App() {
   const { db, loading, error } = useGrafeo({ persist: 'my-app' });
-  
+
   if (loading) return <div>Loading...</div>;
   if (error) return <div>Error: {error.message}</div>;
-  
+
   return <PersonList db={db} />;
 }
 
 function PersonList({ db }) {
-  const { data, loading } = useQuery(db, `MATCH (p:Person) RETURN p`);
-  
+  const { data, loading, refetch } = useQuery(
+    db,
+    `MATCH (p:Person) RETURN p.name`,
+  );
+
   if (loading) return <div>Loading...</div>;
-  
+
   return (
     <ul>
-      {data.map(row => <li key={row.p.id}>{row.p.name}</li>)}
+      {data.map((row, i) => (
+        <li key={i}>{row['p.name']}</li>
+      ))}
     </ul>
   );
 }
@@ -136,123 +172,77 @@ function PersonList({ db }) {
 
 ### Vue
 
-```typescript
+```vue
+<script setup>
 import { useGrafeo, useQuery } from '@grafeo-db/web/vue';
 
 const { db, loading, error } = useGrafeo({ persist: 'my-app' });
-
-const { data } = useQuery(db, `MATCH (p:Person) RETURN p`);
+const { data } = useQuery(db, `MATCH (p:Person) RETURN p.name`);
+</script>
 ```
 
 ### Svelte
 
-```typescript
-import { createGrafeo } from '@grafeo-db/web/svelte';
+```svelte
+<script>
+  import { createGrafeo } from '@grafeo-db/web/svelte';
 
-const { db, loading, error } = createGrafeo({ persist: 'my-app' });
+  const { db, loading, error } = createGrafeo({ persist: 'my-app' });
+</script>
+
+{#if $loading}Loading...{/if}
+{#if $error}Error: {$error.message}{/if}
 ```
 
-## Offline-First
+## Lite Build
 
-Grafeo works completely offline:
-
-```typescript
-const db = await GrafeoDB.create({ persist: 'offline-app' });
-
-// Works with or without network
-await db.execute(`INSERT (:Note {text: 'Remember milk'})`);
-
-// Optional: sync with your backend when online
-if (navigator.onLine) {
-  const changes = await db.changesSince(lastSync);
-  await fetch('/api/sync', { 
-    method: 'POST', 
-    body: JSON.stringify(changes) 
-  });
-}
-```
-
-## Query Languages
+A smaller build with GQL support only:
 
 ```typescript
-// GQL (default)
-await db.execute(`INSERT (:Person {name: 'Alice'})`);
-
-// Cypher
-await db.execute(`CREATE (p:Person {name: 'Bob'})`, { language: 'cypher' });
-
-// SPARQL
-await db.execute(`
-  PREFIX foaf: <http://xmlns.com/foaf/0.1/>
-  SELECT ?name WHERE { ?p foaf:name ?name }
-`, { language: 'sparql' });
-
-// GraphQL
-await db.execute(`
-  query { persons { name } }
-`, { language: 'graphql' });
-
-// Gremlin
-await db.execute(`g.V().hasLabel('Person').values('name')`, { language: 'gremlin' });
-```
-
-## Bundle Size
-
-| Import | Size (gzip) |
-|--------|-------------|
-| `@grafeo-db/web` | ~800 KB |
-| `@grafeo-db/web/lite` | ~400 KB (GQL only) |
-
-### Lite Build
-
-```typescript
-// Smaller bundle, GQL only
 import { GrafeoDB } from '@grafeo-db/web/lite';
+
+const db = await GrafeoDB.create();
+await db.execute(`MATCH (n) RETURN n`);
 ```
 
 ## Browser Support
 
 | Browser | Version |
 |---------|---------|
-| Chrome | 89+ |
-| Firefox | 89+ |
-| Safari | 15+ |
-| Edge | 89+ |
+| Chrome  | 89+     |
+| Firefox | 89+     |
+| Safari  | 15+     |
+| Edge    | 89+     |
 
 Requires WebAssembly, IndexedDB, and Web Workers.
 
 ## Limitations
 
-| Constraint | Limit |
-|------------|-------|
-| Database size | ~500 MB (IndexedDB quota) |
-| Memory | ~256 MB (WASM heap) |
-| Concurrency | Single writer, multiple readers |
+| Constraint   | Limit                          |
+|--------------|--------------------------------|
+| Database size | ~500 MB (IndexedDB quota)     |
+| Memory       | ~256 MB (WASM heap)            |
+| Concurrency  | Single writer, multiple readers |
+| Query languages | GQL only (multi-language pending WASM support) |
+| `changesSince()` | Returns `[]` (pending WASM change tracking) |
+| `exportSnapshot()`/`importSnapshot()` | Pending Rust implementation in WASM crate |
 
 For larger datasets, use [Grafeo](https://github.com/GrafeoDB/grafeo) server-side.
 
-## When to Use
+## Development
 
-**Good fit:**
-- Offline-first applications
-- Privacy-sensitive data (never leaves browser)
-- Local-first software
-- Prototypes and demos
-- PWAs
-
-**Not a fit:**
-- Large datasets (> 500 MB)
-- Multi-device sync (no built-in sync)
-- Server-side rendering
+```bash
+npm run build      # Build all entries via tsup
+npm test           # Run tests (vitest, 63 tests)
+npm run typecheck  # Type check (tsc --noEmit)
+```
 
 ## Related
 
 | Package | Use Case |
 |---------|----------|
-| [`@grafeo-db/js`](https://www.npmjs.com/package/@grafeo-db/js) | Node.js, Deno, Edge runtimes |
-| [`@grafeo-db/wasm`](https://www.npmjs.com/package/@grafeo-db/wasm) | Raw WASM binary |
 | [`grafeo`](https://crates.io/crates/grafeo) | Rust crate |
-| [`grafeo`](https://pypi.org/project/grafeo/) | Python bindings |
+| [`@grafeo-db/wasm`](https://github.com/GrafeoDB/grafeo) | Raw WASM binary |
 
 ## License
 
