@@ -116,9 +116,8 @@ export class GrafeoDB {
       return this.proxy.execute(query, options);
     }
 
-    // Currently the WASM crate only supports GQL via execute().
-    // When executeWithLanguage() is added, we'll route based on options.language.
-    const _language = options?.language ?? 'gql';
+    // TODO: When executeWithLanguage() is added to WASM, route based on options.language
+    void options?.language;
     const result = this.wasm!.execute(query);
 
     if (this.persistence) {

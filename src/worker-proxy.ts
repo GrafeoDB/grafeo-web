@@ -26,10 +26,15 @@ export class WorkerProxy {
 
   /** Initialize the Worker and the WASM database inside it. */
   async init(options?: CreateOptions): Promise<void> {
-    // Create an inline Worker from the bundled worker entry point.
-    // This avoids needing a separate file URL, which is problematic
-    // with bundlers and CDN usage.
-    const workerUrl = new URL('./worker.js', import.meta.url);
+    // Resolve the worker URL relative to this module.
+    // Note: import.meta.url is only available in ESM.
+    // In CJS environments, Worker usage requires a bundler that supports this.
+    const workerUrl = new URL(
+      './worker.js',
+      // eslint-disable-next-line @typescript-eslint/ban-ts-comment
+      // @ts-ignore -- import.meta.url is ESM-only; CJS build warns but worker is ESM-first
+      import.meta.url,
+    );
     this.worker = new Worker(workerUrl, { type: 'module' });
 
     this.worker.onmessage = (event: MessageEvent<WorkerResponse>) => {

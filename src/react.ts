@@ -90,7 +90,7 @@ export function useQuery<T = Record<string, unknown>[]>(
   const mountedRef = useRef(true);
 
   const refetch = useCallback(() => {
-    setVersion((v) => v + 1);
+    setVersion((v: number) => v + 1);
   }, []);
 
   useEffect(() => {
