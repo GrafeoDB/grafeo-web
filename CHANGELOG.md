@@ -2,6 +2,23 @@
 
 All notable changes to `@grafeo-db/web`.
 
+## [0.1.2] - 2026-02-08
+
+_Bug Fixes & Robustness_
+
+### Fixed
+
+- **WASM init race condition**: concurrent `create()` calls no longer double-initialize the WASM module; uses a promise singleton pattern via shared `src/wasm-init.ts`
+- **Duplicate WASM init**: `index.ts` and `lite.ts` now share a single initialization, preventing double-loading when both modules are imported
+- **Unnecessary persistence writes**: `execute()` and `executeRaw()` no longer trigger IndexedDB saves for read-only queries (MATCH); only mutating queries (INSERT, CREATE, DELETE, etc) schedule persistence
+- **Silent persistence failures**: `scheduleSave()` now catches errors in the debounced callback and reports them via a configurable `onError` handler (defaults to `console.error`)
+
+### Added
+
+- `GrafeoDB.version()` static method exposing the WASM engine version
+- `db.isOpen` getter for checking database state without try/catch
+- Test suite for the lite build (`src/lite.test.ts`)
+
 ## [0.1.1] - 2026-02-08
 
 _First Working Implementation - Browser Graph Database via WebAssembly_
