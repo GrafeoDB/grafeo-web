@@ -57,6 +57,21 @@ console.log(GrafeoDB.version()); // e.g. "0.4.3"
 await db.close();
 ```
 
+## Multi-Language Queries
+
+```typescript
+// GQL (default)
+await db.execute(`MATCH (p:Person) RETURN p.name`);
+
+// Cypher
+await db.execute(`MATCH (p:Person) RETURN p.name`, { language: 'cypher' });
+
+// SPARQL
+await db.execute(`SELECT ?name WHERE { ?p a :Person ; :name ?name }`, { language: 'sparql' });
+```
+
+Supported: `gql`, `cypher`, `sparql`, `gremlin`, `graphql`.
+
 ## API
 
 ### `GrafeoDB`
@@ -65,10 +80,11 @@ await db.close();
 |--------|-------------|
 | `GrafeoDB.create(options?)` | Create a database instance |
 | `GrafeoDB.version()` | Get the WASM engine version |
-| `db.execute(query, options?)` | Execute a GQL query, returns `Record<string, unknown>[]` |
+| `db.execute(query, options?)` | Execute a query (GQL default, or specify language), returns `Record<string, unknown>[]` |
 | `db.executeRaw(query)` | Execute a query, returns columns + rows + timing |
 | `db.nodeCount()` | Number of nodes |
 | `db.edgeCount()` | Number of edges |
+| `db.schema()` | Schema info: labels, edge types, property keys |
 | `db.export()` | Export full database as a snapshot |
 | `db.import(snapshot)` | Restore from a snapshot |
 | `db.clear()` | Delete all data |
@@ -223,9 +239,7 @@ Requires WebAssembly, IndexedDB, and Web Workers.
 | Database size | ~500 MB (IndexedDB quota)     |
 | Memory       | ~256 MB (WASM heap)            |
 | Concurrency  | Single writer, multiple readers |
-| Query languages | GQL only (multi-language pending WASM support) |
 | `changesSince()` | Returns `[]` (pending WASM change tracking) |
-| `exportSnapshot()`/`importSnapshot()` | Pending Rust implementation in WASM crate |
 
 For larger datasets, use [Grafeo](https://github.com/GrafeoDB/grafeo) server-side.
 
