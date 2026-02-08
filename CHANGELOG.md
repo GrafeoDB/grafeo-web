@@ -2,7 +2,7 @@
 
 All notable changes to `@grafeo-db/web`.
 
-## [0.1.0] - 2026-02-08
+## [0.1.1] - 2026-02-08
 
 _First Working Implementation - Browser Graph Database via WebAssembly_
 
