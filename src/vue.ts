@@ -1,9 +1,9 @@
 import { onUnmounted, ref, watch, type Ref } from 'vue';
 
 import { GrafeoDB } from './index';
-import type { CreateOptions } from './types';
+import type { CreateOptions, ExecuteOptions } from './types';
 
-export type { CreateOptions };
+export type { CreateOptions, ExecuteOptions };
 
 export interface UseGrafeoResult {
   db: Ref<GrafeoDB | null>;
@@ -69,6 +69,7 @@ export function useGrafeo(options?: CreateOptions): UseGrafeoResult {
 export function useQuery<T = Record<string, unknown>[]>(
   db: Ref<GrafeoDB | null>,
   query: string,
+  options?: ExecuteOptions,
 ): UseQueryResult<T> {
   const data = ref<T | null>(null) as Ref<T | null>;
   const loading = ref(true);
@@ -92,7 +93,7 @@ export function useQuery<T = Record<string, unknown>[]>(
       error.value = null;
 
       try {
-        const result = await database.execute(query);
+        const result = await database.execute(query, options);
         data.value = result as T;
       } catch (err: unknown) {
         error.value = err instanceof Error ? err : new Error(String(err));
