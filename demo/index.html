@@ -1,0 +1,436 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Grafeo Playground</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: #0d1117;
+      color: #c9d1d9;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+    }
+
+    header {
+      padding: 1rem 1.5rem;
+      border-bottom: 1px solid #21262d;
+      display: flex;
+      align-items: center;
+      gap: 1rem;
+    }
+
+    header h1 {
+      font-size: 1.25rem;
+      font-weight: 600;
+      color: #f0f6fc;
+    }
+
+    header .version {
+      font-size: 0.75rem;
+      color: #8b949e;
+      background: #21262d;
+      padding: 0.15rem 0.5rem;
+      border-radius: 1rem;
+    }
+
+    header .status {
+      margin-left: auto;
+      font-size: 0.75rem;
+      display: flex;
+      align-items: center;
+      gap: 0.4rem;
+    }
+
+    .status-dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: #484f58;
+    }
+
+    .status-dot.ready { background: #3fb950; }
+    .status-dot.loading { background: #d29922; }
+    .status-dot.error { background: #f85149; }
+
+    main {
+      flex: 1;
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      grid-template-rows: auto 1fr;
+      gap: 0;
+    }
+
+    .panel-header {
+      padding: 0.5rem 1rem;
+      font-size: 0.75rem;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      color: #8b949e;
+      background: #161b22;
+      border-bottom: 1px solid #21262d;
+    }
+
+    .editor-panel {
+      grid-row: 1 / 3;
+      display: flex;
+      flex-direction: column;
+      border-right: 1px solid #21262d;
+    }
+
+    #query {
+      flex: 1;
+      background: #0d1117;
+      color: #c9d1d9;
+      border: none;
+      padding: 1rem;
+      font-family: 'SF Mono', 'Fira Code', 'Cascadia Code', monospace;
+      font-size: 0.875rem;
+      line-height: 1.6;
+      resize: none;
+      outline: none;
+      tab-size: 2;
+    }
+
+    .toolbar {
+      padding: 0.5rem 1rem;
+      border-top: 1px solid #21262d;
+      background: #161b22;
+      display: flex;
+      align-items: center;
+      gap: 0.75rem;
+    }
+
+    button {
+      background: #238636;
+      color: #fff;
+      border: 1px solid #2ea043;
+      padding: 0.35rem 1rem;
+      border-radius: 6px;
+      font-size: 0.8rem;
+      font-weight: 500;
+      cursor: pointer;
+      transition: background 0.15s;
+    }
+
+    button:hover { background: #2ea043; }
+    button:active { background: #238636; }
+
+    button:disabled {
+      background: #21262d;
+      border-color: #30363d;
+      color: #484f58;
+      cursor: not-allowed;
+    }
+
+    button.secondary {
+      background: #21262d;
+      border-color: #30363d;
+      color: #c9d1d9;
+    }
+
+    button.secondary:hover { background: #30363d; }
+
+    .timing {
+      font-size: 0.75rem;
+      color: #8b949e;
+      margin-left: auto;
+    }
+
+    .results-panel {
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+    }
+
+    #results {
+      flex: 1;
+      overflow: auto;
+      padding: 1rem;
+      font-family: 'SF Mono', 'Fira Code', 'Cascadia Code', monospace;
+      font-size: 0.8rem;
+      line-height: 1.5;
+      white-space: pre-wrap;
+      word-break: break-word;
+    }
+
+    .result-table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 0.8rem;
+    }
+
+    .result-table th {
+      text-align: left;
+      padding: 0.4rem 0.75rem;
+      border-bottom: 2px solid #30363d;
+      color: #f0f6fc;
+      font-weight: 600;
+      position: sticky;
+      top: 0;
+      background: #0d1117;
+    }
+
+    .result-table td {
+      padding: 0.35rem 0.75rem;
+      border-bottom: 1px solid #21262d;
+    }
+
+    .result-table tr:hover td {
+      background: #161b22;
+    }
+
+    .error-text { color: #f85149; }
+    .muted { color: #484f58; }
+    .row-count {
+      padding: 0.5rem 1rem;
+      font-size: 0.75rem;
+      color: #8b949e;
+      border-top: 1px solid #21262d;
+      background: #161b22;
+    }
+
+    .samples {
+      padding: 0.5rem 1rem;
+      border-top: 1px solid #21262d;
+      background: #161b22;
+      display: flex;
+      gap: 0.5rem;
+      flex-wrap: wrap;
+    }
+
+    .samples label {
+      font-size: 0.7rem;
+      color: #8b949e;
+      margin-right: 0.25rem;
+    }
+
+    .sample-btn {
+      background: none;
+      border: 1px solid #30363d;
+      color: #8b949e;
+      padding: 0.2rem 0.5rem;
+      border-radius: 4px;
+      font-size: 0.7rem;
+      cursor: pointer;
+    }
+
+    .sample-btn:hover {
+      border-color: #58a6ff;
+      color: #58a6ff;
+      background: none;
+    }
+
+    @media (max-width: 768px) {
+      main {
+        grid-template-columns: 1fr;
+        grid-template-rows: auto auto auto 1fr;
+      }
+      .editor-panel { grid-row: auto; min-height: 200px; border-right: none; border-bottom: 1px solid #21262d; }
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>Grafeo Playground</h1>
+    <span class="version" id="version">loading...</span>
+    <div class="status">
+      <div class="status-dot loading" id="status-dot"></div>
+      <span id="status-text">Initializing...</span>
+    </div>
+  </header>
+
+  <main>
+    <div class="editor-panel">
+      <div class="panel-header">Query</div>
+      <textarea id="query" spellcheck="false">MATCH (p:Person)-[:KNOWS]->(friend)
+RETURN p.name, p.age, friend.name</textarea>
+      <div class="samples">
+        <label>Samples:</label>
+        <button class="sample-btn" data-query="MATCH (p:Person) RETURN p.name, p.age">All people</button>
+        <button class="sample-btn" data-query="MATCH (p:Person)-[k:KNOWS]->(f) RETURN p.name, f.name, k.since">Friendships</button>
+        <button class="sample-btn" data-query="MATCH (p:Person)-[:WORKS_AT]->(c:Company) RETURN p.name, c.name, c.industry">Employment</button>
+        <button class="sample-btn" data-query="MATCH (n) RETURN labels(n) AS type, count(*) AS total">Node counts</button>
+        <button class="sample-btn" data-query="INSERT (:Person {name: 'Charlie', age: 35})">Insert node</button>
+      </div>
+      <div class="toolbar">
+        <button id="run" disabled>Run</button>
+        <button id="reset" class="secondary" disabled>Reset DB</button>
+        <span class="timing" id="timing"></span>
+      </div>
+    </div>
+
+    <div class="results-panel">
+      <div class="panel-header">Results</div>
+      <div id="results"><span class="muted">Run a query to see results...</span></div>
+      <div class="row-count" id="row-count"></div>
+    </div>
+  </main>
+
+  <script type="module">
+    // When @grafeo-db/web is published, use: import { GrafeoDB } from 'https://esm.sh/@grafeo-db/web';
+    // For local development, use the built output:
+    import { GrafeoDB } from '../dist/index.js';
+
+    const queryEl = document.getElementById('query');
+    const resultsEl = document.getElementById('results');
+    const runBtn = document.getElementById('run');
+    const resetBtn = document.getElementById('reset');
+    const timingEl = document.getElementById('timing');
+    const rowCountEl = document.getElementById('row-count');
+    const versionEl = document.getElementById('version');
+    const statusDot = document.getElementById('status-dot');
+    const statusText = document.getElementById('status-text');
+
+    let db = null;
+
+    const SEED_QUERIES = [
+      `INSERT (:Person {name: 'Alice', age: 30})`,
+      `INSERT (:Person {name: 'Bob', age: 25})`,
+      `INSERT (:Person {name: 'Diana', age: 28})`,
+      `INSERT (:Company {name: 'Acme Corp', industry: 'Technology'})`,
+      `INSERT (:Company {name: 'Globex', industry: 'Research'})`,
+      `MATCH (a:Person {name: 'Alice'}), (b:Person {name: 'Bob'}) INSERT (a)-[:KNOWS {since: 2020}]->(b)`,
+      `MATCH (a:Person {name: 'Alice'}), (d:Person {name: 'Diana'}) INSERT (a)-[:KNOWS {since: 2022}]->(d)`,
+      `MATCH (b:Person {name: 'Bob'}), (d:Person {name: 'Diana'}) INSERT (b)-[:KNOWS {since: 2023}]->(d)`,
+      `MATCH (a:Person {name: 'Alice'}), (c:Company {name: 'Acme Corp'}) INSERT (a)-[:WORKS_AT {role: 'Engineer'}]->(c)`,
+      `MATCH (b:Person {name: 'Bob'}), (g:Company {name: 'Globex'}) INSERT (b)-[:WORKS_AT {role: 'Researcher'}]->(g)`,
+      `MATCH (d:Person {name: 'Diana'}), (c:Company {name: 'Acme Corp'}) INSERT (d)-[:WORKS_AT {role: 'Designer'}]->(c)`,
+    ];
+
+    async function seedDatabase() {
+      for (const q of SEED_QUERIES) {
+        await db.execute(q);
+      }
+    }
+
+    function setStatus(state, text) {
+      statusDot.className = 'status-dot ' + state;
+      statusText.textContent = text;
+    }
+
+    function renderResults(data) {
+      if (!Array.isArray(data) || data.length === 0) {
+        resultsEl.innerHTML = '<span class="muted">No results</span>';
+        rowCountEl.textContent = '0 rows';
+        return;
+      }
+
+      const columns = Object.keys(data[0]);
+      const table = document.createElement('table');
+      table.className = 'result-table';
+
+      const thead = document.createElement('thead');
+      const headerRow = document.createElement('tr');
+      for (const col of columns) {
+        const th = document.createElement('th');
+        th.textContent = col;
+        headerRow.appendChild(th);
+      }
+      thead.appendChild(headerRow);
+      table.appendChild(thead);
+
+      const tbody = document.createElement('tbody');
+      for (const row of data) {
+        const tr = document.createElement('tr');
+        for (const col of columns) {
+          const td = document.createElement('td');
+          const val = row[col];
+          td.textContent = val === null || val === undefined ? 'null' : String(val);
+          tr.appendChild(td);
+        }
+        tbody.appendChild(tr);
+      }
+      table.appendChild(tbody);
+
+      resultsEl.innerHTML = '';
+      resultsEl.appendChild(table);
+      rowCountEl.textContent = `${data.length} row${data.length === 1 ? '' : 's'}`;
+    }
+
+    async function runQuery() {
+      const query = queryEl.value.trim();
+      if (!query || !db) return;
+
+      runBtn.disabled = true;
+      timingEl.textContent = '';
+
+      try {
+        const start = performance.now();
+        const result = await db.execute(query);
+        const elapsed = (performance.now() - start).toFixed(1);
+        timingEl.textContent = `${elapsed} ms`;
+
+        if (Array.isArray(result) && result.length > 0) {
+          renderResults(result);
+        } else {
+          resultsEl.innerHTML = '<span class="muted">Query executed successfully (no rows returned)</span>';
+          rowCountEl.textContent = '0 rows';
+        }
+      } catch (err) {
+        resultsEl.innerHTML = `<span class="error-text">${err.message}</span>`;
+        rowCountEl.textContent = '';
+        timingEl.textContent = '';
+      } finally {
+        runBtn.disabled = false;
+      }
+    }
+
+    // Event listeners
+    runBtn.addEventListener('click', runQuery);
+
+    queryEl.addEventListener('keydown', (e) => {
+      if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
+        e.preventDefault();
+        runQuery();
+      }
+    });
+
+    resetBtn.addEventListener('click', async () => {
+      if (!db) return;
+      resetBtn.disabled = true;
+      try {
+        await db.close();
+        db = await GrafeoDB.create();
+        await seedDatabase();
+        resultsEl.innerHTML = '<span class="muted">Database reset with sample data</span>';
+        rowCountEl.textContent = '';
+        timingEl.textContent = '';
+      } catch (err) {
+        resultsEl.innerHTML = `<span class="error-text">${err.message}</span>`;
+      } finally {
+        resetBtn.disabled = false;
+      }
+    });
+
+    for (const btn of document.querySelectorAll('.sample-btn')) {
+      btn.addEventListener('click', () => {
+        queryEl.value = btn.dataset.query;
+        runQuery();
+      });
+    }
+
+    // Initialize
+    try {
+      setStatus('loading', 'Loading WASM...');
+      db = await GrafeoDB.create();
+      versionEl.textContent = `v${GrafeoDB.version()}`;
+
+      setStatus('loading', 'Seeding data...');
+      await seedDatabase();
+
+      setStatus('ready', 'Ready');
+      runBtn.disabled = false;
+      resetBtn.disabled = false;
+    } catch (err) {
+      setStatus('error', 'Failed to load');
+      resultsEl.innerHTML = `<span class="error-text">Failed to initialize: ${err.message}</span>`;
+    }
+  </script>
+</body>
+</html>

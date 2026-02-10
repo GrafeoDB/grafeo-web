@@ -2,6 +2,28 @@
 
 All notable changes to `@grafeo-db/web`.
 
+## [0.2.1] - 2026-02-15
+
+_Release Prep — Framework Parity, License, CI, Demo_
+
+### Added
+
+- **Svelte `createQuery`** (`src/svelte.ts`): new store factory for reactive queries with `{ data, loading, error, refetch }`, matching the React/Vue API
+- **`ExecuteOptions` in Vue/Svelte**: `useQuery()` and `createQuery()` now accept `{ language }` option, aligning all three frameworks
+- **CI test step**: `npm test` now runs in the GitHub Actions pipeline across Node.js 18/20/22
+- **Interactive demo** (`demo/index.html`): standalone Grafeo Playground with query editor, sample data, and table results
+
+### Changed
+
+- **License**: re-licensed from Apache-2.0 to **AGPL-3.0-or-later** to match `@grafeo-db/wasm` dependency
+- **`@grafeo-db/wasm` from npm**: dependency now points to `^0.4.3` on the npm registry (was a local `file:` link)
+- **vitest 4.x compatibility**: updated worker-proxy test mocks to use `function` syntax for constructor mocks
+- Test count: 68 total (up from 63)
+
+### Removed
+
+- README note about `@grafeo-db/wasm` not being published (it is now)
+
 ## [0.2.0] - 2026-02-08
 
 _Upgrade to Grafeo WASM 0.4.3 — Full API Support_

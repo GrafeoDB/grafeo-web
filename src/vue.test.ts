@@ -130,6 +130,25 @@ describe('useQuery (Vue)', () => {
     unmount();
   });
 
+  it('passes ExecuteOptions to execute', async () => {
+    db = await GrafeoDB.create();
+    dbRef = ref(db) as Ref<GrafeoDBInstance | null>;
+
+    const executeSpy = vi.spyOn(db, 'execute');
+
+    const { result, unmount } = withSetup(() =>
+      useQuery(dbRef, 'MATCH (p:Person) RETURN p.name', { language: 'cypher' }),
+    );
+
+    await vi.waitFor(() => {
+      expect(result.loading.value).toBe(false);
+    });
+
+    expect(executeSpy).toHaveBeenCalledWith('MATCH (p:Person) RETURN p.name', { language: 'cypher' });
+
+    unmount();
+  });
+
   it('refetch triggers re-execution', async () => {
     db = await GrafeoDB.create();
     dbRef = ref(db) as Ref<GrafeoDBInstance | null>;

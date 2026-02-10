@@ -2,7 +2,9 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 vi.mock('@grafeo-db/wasm', () => import('./__mocks__/wasm'));
 
-const { createGrafeo } = await import('./svelte');
+const { createGrafeo, createQuery } = await import('./svelte');
+const { GrafeoDB } = await import('./index');
+type GrafeoDBInstance = Awaited<ReturnType<typeof GrafeoDB.create>>;
 
 /** Helper: subscribe to a store and return the latest value + unsubscribe. */
 function get<T>(store: { subscribe(fn: (v: T) => void): () => void }): {
@@ -145,5 +147,103 @@ describe('createGrafeo (Svelte)', () => {
     l.unsubscribe();
     e.unsubscribe();
     createSpy.mockRestore();
+  });
+});
+
+describe('createQuery (Svelte)', () => {
+  it('executes query when db store emits a database', async () => {
+    const { db, loading: dbLoading, close } = createGrafeo();
+
+    const dbL = get(dbLoading);
+    await vi.waitFor(() => {
+      expect(dbL.value()).toBe(false);
+    });
+    dbL.unsubscribe();
+
+    const { data, loading, error } = createQuery(db, 'MATCH (p:Person) RETURN p.name');
+    const d = get(data);
+    const l = get(loading);
+    const e = get(error);
+
+    await vi.waitFor(() => {
+      expect(l.value()).toBe(false);
+    });
+
+    expect(d.value()).not.toBe(null);
+    expect(e.value()).toBe(null);
+
+    d.unsubscribe();
+    l.unsubscribe();
+    e.unsubscribe();
+    await close();
+  });
+
+  it('stays loading when db store has null', () => {
+    const nullDb = {
+      subscribe(fn: (v: GrafeoDBInstance | null) => void) {
+        fn(null);
+        return () => {};
+      },
+    };
+
+    const { loading } = createQuery(nullDb, 'MATCH (n) RETURN n');
+    const l = get(loading);
+
+    expect(l.value()).toBe(true);
+
+    l.unsubscribe();
+  });
+
+  it('passes ExecuteOptions to execute', async () => {
+    const db = await GrafeoDB.create();
+    const executeSpy = vi.spyOn(db, 'execute');
+
+    const dbStore = {
+      subscribe(fn: (v: GrafeoDBInstance | null) => void) {
+        fn(db);
+        return () => {};
+      },
+    };
+
+    const { loading } = createQuery(dbStore, 'MATCH (p:Person) RETURN p.name', { language: 'cypher' });
+    const l = get(loading);
+
+    await vi.waitFor(() => {
+      expect(l.value()).toBe(false);
+    });
+
+    expect(executeSpy).toHaveBeenCalledWith('MATCH (p:Person) RETURN p.name', { language: 'cypher' });
+
+    l.unsubscribe();
+    await db.close();
+  });
+
+  it('refetch triggers re-execution', async () => {
+    const db = await GrafeoDB.create();
+    const executeSpy = vi.spyOn(db, 'execute');
+
+    const dbStore = {
+      subscribe(fn: (v: GrafeoDBInstance | null) => void) {
+        fn(db);
+        return () => {};
+      },
+    };
+
+    const { loading, refetch } = createQuery(dbStore, 'MATCH (n) RETURN n');
+    const l = get(loading);
+
+    await vi.waitFor(() => {
+      expect(l.value()).toBe(false);
+    });
+
+    const callCount = executeSpy.mock.calls.length;
+    refetch();
+
+    await vi.waitFor(() => {
+      expect(executeSpy.mock.calls.length).toBeGreaterThan(callCount);
+    });
+
+    l.unsubscribe();
+    await db.close();
   });
 });

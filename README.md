@@ -1,3 +1,8 @@
+[![CI](https://github.com/GrafeoDB/grafeo-web/actions/workflows/ci.yml/badge.svg)](https://github.com/GrafeoDB/grafeo-web/actions/workflows/ci.yml)
+[![codecov](https://codecov.io/gh/GrafeoDB/grafeo-web/graph/badge.svg)](https://codecov.io/gh/GrafeoDB/grafeo-web)
+[![npm](https://img.shields.io/npm/v/@grafeo-db/web.svg)](https://www.npmjs.com/package/@grafeo-db/web)
+[![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
+
 # @grafeo-db/web
 
 [Grafeo](https://github.com/GrafeoDB/grafeo) graph database in the browser.
@@ -18,8 +23,6 @@ Zero backend. Your data stays on the client.
 ```bash
 npm install @grafeo-db/web
 ```
-
-> **Note**: `@grafeo-db/wasm` is not yet published to npm. For now, link it locally from the [grafeo](https://github.com/GrafeoDB/grafeo) repo.
 
 ## Quick Start
 
@@ -260,4 +263,4 @@ npm run typecheck  # Type check (tsc --noEmit)
 
 ## License
 
-Apache-2.0
+AGPL-3.0-or-later

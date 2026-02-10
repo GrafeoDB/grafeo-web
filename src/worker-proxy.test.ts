@@ -14,7 +14,7 @@ let mockWorker: MockWorker;
 
 vi.stubGlobal(
   'Worker',
-  vi.fn(() => {
+  vi.fn(function () {
     mockWorker = {
       postMessage: vi.fn(),
       terminate: vi.fn(),
@@ -24,9 +24,6 @@ vi.stubGlobal(
     return mockWorker;
   }),
 );
-
-// Also stub URL constructor for import.meta.url usage
-vi.stubGlobal('URL', vi.fn(() => 'blob:mock'));
 
 const { WorkerProxy } = await import('./worker-proxy');
 
