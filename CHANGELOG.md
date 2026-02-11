@@ -4,7 +4,7 @@ All notable changes to `@grafeo-db/web`.
 
 ## [0.2.1] - 2026-02-15
 
-_Release Prep — Framework Parity, License, CI, Demo_
+_Release Prep — Framework Parity, CI, Demo_
 
 ### Added
 
@@ -15,7 +15,6 @@ _Release Prep — Framework Parity, License, CI, Demo_
 
 ### Changed
 
-- **License**: re-licensed from Apache-2.0 to **AGPL-3.0-or-later** to match `@grafeo-db/wasm` dependency
 - **`@grafeo-db/wasm` from npm**: dependency now points to `^0.4.3` on the npm registry (was a local `file:` link)
 - **vitest 4.x compatibility**: updated worker-proxy test mocks to use `function` syntax for constructor mocks
 - Test count: 68 total (up from 63)
