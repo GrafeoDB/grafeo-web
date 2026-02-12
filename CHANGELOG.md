@@ -2,7 +2,7 @@
 
 All notable changes to `@grafeo-db/web`.
 
-## [0.2.1] - 2026-02-15
+## [0.2.1] - 2026-02-11
 
 _Release Prep — Framework Parity, CI, Demo_
 
