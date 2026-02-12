@@ -1,7 +1,7 @@
 /**
  * Type declarations for @grafeo-db/wasm.
  *
- * These mirror the wasm-bindgen generated types from the WASM crate (v0.4.3).
+ * These mirror the wasm-bindgen generated types from the WASM crate (v0.5.0).
  * Once @grafeo-db/wasm is published to npm with its own types, this file
  * can be removed.
  */
