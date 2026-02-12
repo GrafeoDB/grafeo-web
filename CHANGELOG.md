@@ -2,7 +2,25 @@
 
 All notable changes to `@grafeo-db/web`.
 
-## [0.2.1] - 2026-02-11
+## [0.5.1] - 2026-02-12
+
+_Version Alignment with Grafeo Core_
+
+### Changed
+
+- **Lockstep versioning**: `@grafeo-db/web` now follows the same version number as the core `grafeo` engine, making compatibility obvious — web 0.5.1 = grafeo 0.5.1
+
+## [0.5.0] - 2026-02-11
+
+_Upgrade to Grafeo WASM 0.5.0_
+
+### Changed
+
+- **`@grafeo-db/wasm` 0.5.0**: upgraded dependency from `^0.4.3` to `^0.5.0`
+- **Peer dependency minimums**: React >=19 (was >=18), Svelte >=5 (was >=3)
+- **Vitest mock alias**: WASM mock now resolved via `resolve.alias` in vitest config instead of manual imports
+
+## [0.2.1] - 2026-02-15
 
 _Release Prep — Framework Parity, CI, Demo_
 
