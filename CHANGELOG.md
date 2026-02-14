@@ -8,7 +8,7 @@ _Version Alignment with Grafeo Core_
 
 ### Changed
 
-- **Lockstep versioning**: `@grafeo-db/web` now follows the same version number as the core `grafeo` engine, making compatibility obvious — web 0.5.1 = grafeo 0.5.1
+- **Lockstep versioning**: `@grafeo-db/web` now follows the same version number as the core `grafeo` engine, making compatibility obvious - web 0.5.1 = grafeo 0.5.1
 
 ## [0.5.0] - 2026-02-11
 
@@ -22,7 +22,7 @@ _Upgrade to Grafeo WASM 0.5.0_
 
 ## [0.2.1] - 2026-02-15
 
-_Release Prep — Framework Parity, CI, Demo_
+_Release Prep - Framework Parity, CI, Demo_
 
 ### Added
 
@@ -43,7 +43,7 @@ _Release Prep — Framework Parity, CI, Demo_
 
 ## [0.2.0] - 2026-02-08
 
-_Upgrade to Grafeo WASM 0.4.3 — Full API Support_
+_Upgrade to Grafeo WASM 0.4.3 - Full API Support_
 
 ### Added
 
@@ -53,7 +53,7 @@ _Upgrade to Grafeo WASM 0.4.3 — Full API Support_
 
 ### Changed
 
-- **WASM 0.4.3**: upgraded from 0.4.2 — includes `executeWithLanguage`, `exportSnapshot`/`importSnapshot`, and `schema`
+- **WASM 0.4.3**: upgraded from 0.4.2 - includes `executeWithLanguage`, `exportSnapshot`/`importSnapshot`, and `schema`
 - **`importSnapshot` is now static**: creates a new `Database` instance from snapshot bytes (was an instance method). This changes the internal persistence restore and `import()` flows
 - Mock updated to match 0.4.3 API surface (`executeWithLanguage`, `schema`, static `importSnapshot`)
 

@@ -7,12 +7,12 @@
 
 [Grafeo](https://github.com/GrafeoDB/grafeo) graph database in the browser.
 
-Zero backend. Your data stays on the client.
+Zero backend. Data stays on the client.
 
 ## Features
 
 - **Zero backend**: Grafeo runs entirely in the browser via WebAssembly
-- **Persistent storage**: IndexedDB keeps your data across sessions
+- **Persistent storage**: IndexedDB keeps data across sessions
 - **Non-blocking**: Web Worker execution keeps the UI responsive
 - **Multi-language queries**: GQL, Cypher, SPARQL, Gremlin, GraphQL
 - **Framework integrations**: React, Vue, Svelte
@@ -151,7 +151,7 @@ const db = await GrafeoDB.create({
   persist: 'large-database',
 });
 
-// Queries run in background thread — UI stays responsive
+// Queries run in background thread - UI stays responsive
 const result = await db.execute(`MATCH (a)-[*1..5]->(b) RETURN count(*)`);
 ```
 
@@ -233,7 +233,7 @@ await db.execute(`MATCH (n) RETURN n`);
 | Safari  | 15+     |
 | Edge    | 89+     |
 
-Requires WebAssembly, IndexedDB, and Web Workers.
+Requires WebAssembly, IndexedDB and Web Workers.
 
 ## Limitations
 
