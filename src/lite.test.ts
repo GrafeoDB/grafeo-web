@@ -59,6 +59,21 @@ describe('GrafeoDB (lite)', () => {
     it('throws on invalid query', async () => {
       await expect(db.execute('INVALID QUERY')).rejects.toThrow();
     });
+
+    it('passes params to WASM executeWithParams', async () => {
+      await db.execute("INSERT (:Person {name: 'Alice', age: 30})");
+      const results = await db.execute(
+        'MATCH (p:Person) RETURN p.name, p.age',
+        { params: { name: 'Alice' } },
+      );
+      expect(results).toHaveLength(1);
+    });
+
+    it('works without params (backward compatible)', async () => {
+      await db.execute("INSERT (:Person {name: 'Alice'})");
+      const results = await db.execute('MATCH (p:Person) RETURN p.name');
+      expect(results).toHaveLength(1);
+    });
   });
 
   describe('executeRaw()', () => {

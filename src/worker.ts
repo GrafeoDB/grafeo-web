@@ -13,6 +13,18 @@ import type { WorkerRequest, WorkerResponse } from './types';
 let db: Database | null = null;
 let persistence: PersistenceManager | null = null;
 
+function assertWorkerFeature(
+  target: Database,
+  methodName: string,
+  featureName: string,
+): void {
+  if (typeof (target as unknown as Record<string, unknown>)[methodName] !== 'function') {
+    throw new Error(
+      `${methodName}() requires @grafeo-db/wasm built with the '${featureName}' feature`,
+    );
+  }
+}
+
 function respond(id: number, result?: unknown, error?: string): void {
   const message: WorkerResponse = { id };
   if (error !== undefined) {
@@ -52,11 +64,21 @@ async function handleMessage(request: WorkerRequest): Promise<void> {
       case 'execute': {
         if (!db) throw new Error('Database not initialized');
         const query = args[0] as string;
-        const options = args[1] as { language?: string } | undefined;
+        const options = args[1] as { language?: string; params?: Record<string, unknown> } | undefined;
         const lang = options?.language;
-        const result = lang && lang !== 'gql'
-          ? db.executeWithLanguage(query, lang)
-          : db.execute(query);
+        const params = options?.params;
+        const hasLang = lang && lang !== 'gql';
+
+        let result: Record<string, unknown>[];
+        if (hasLang && params) {
+          result = db.executeWithLanguageAndParams(query, lang, params) as Record<string, unknown>[];
+        } else if (hasLang) {
+          result = db.executeWithLanguage(query, lang) as Record<string, unknown>[];
+        } else if (params) {
+          result = db.executeWithParams(query, params) as Record<string, unknown>[];
+        } else {
+          result = db.execute(query) as Record<string, unknown>[];
+        }
 
         if (persistence && isMutatingQuery(query)) {
           persistence.scheduleSave(() => db!.exportSnapshot());
@@ -69,7 +91,11 @@ async function handleMessage(request: WorkerRequest): Promise<void> {
       case 'executeRaw': {
         if (!db) throw new Error('Database not initialized');
         const query = args[0] as string;
-        const result = db.executeRaw(query);
+        const options = args[1] as { language?: string } | undefined;
+        const lang = options?.language;
+        const result = lang && lang !== 'gql'
+          ? db.executeRawWithLanguage(query, lang)
+          : db.executeRaw(query);
 
         if (persistence && isMutatingQuery(query)) {
           persistence.scheduleSave(() => db!.exportSnapshot());
@@ -136,6 +162,58 @@ async function handleMessage(request: WorkerRequest): Promise<void> {
         } else {
           respond(id, { bytesUsed: 0, quota: 0 });
         }
+        break;
+      }
+
+      case 'createTextIndex': {
+        if (!db) throw new Error('Database not initialized');
+        const [label, property] = args as [string, string];
+        assertWorkerFeature(db, 'createTextIndex', 'text-index');
+        db.createTextIndex(label, property);
+        if (persistence) {
+          persistence.scheduleSave(() => db!.exportSnapshot());
+        }
+        respond(id);
+        break;
+      }
+
+      case 'dropTextIndex': {
+        if (!db) throw new Error('Database not initialized');
+        const [label, property] = args as [string, string];
+        assertWorkerFeature(db, 'dropTextIndex', 'text-index');
+        const existed = db.dropTextIndex(label, property);
+        if (persistence) {
+          persistence.scheduleSave(() => db!.exportSnapshot());
+        }
+        respond(id, existed);
+        break;
+      }
+
+      case 'rebuildTextIndex': {
+        if (!db) throw new Error('Database not initialized');
+        const [label, property] = args as [string, string];
+        assertWorkerFeature(db, 'rebuildTextIndex', 'text-index');
+        db.rebuildTextIndex(label, property);
+        if (persistence) {
+          persistence.scheduleSave(() => db!.exportSnapshot());
+        }
+        respond(id);
+        break;
+      }
+
+      case 'textSearch': {
+        if (!db) throw new Error('Database not initialized');
+        const [label, property, query, k] = args as [string, string, string, number];
+        assertWorkerFeature(db, 'textSearch', 'text-index');
+        respond(id, db.textSearch(label, property, query, k));
+        break;
+      }
+
+      case 'hybridSearch': {
+        if (!db) throw new Error('Database not initialized');
+        const [label, textProp, vectorProp, queryText, k] = args as [string, string, string, string, number];
+        assertWorkerFeature(db, 'hybridSearch', 'hybrid-search');
+        respond(id, db.hybridSearch(label, textProp, vectorProp, queryText, k));
         break;
       }
 

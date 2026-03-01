@@ -7,11 +7,12 @@ import type {
   Change,
   CreateOptions,
   DatabaseSnapshot,
+  LiteExecuteOptions,
   RawQueryResult,
   StorageStats,
 } from './types';
 
-export type { Change, CreateOptions, DatabaseSnapshot, RawQueryResult, StorageStats };
+export type { Change, CreateOptions, DatabaseSnapshot, LiteExecuteOptions, RawQueryResult, StorageStats };
 
 /**
  * A lightweight Grafeo database supporting GQL only.
@@ -75,9 +76,15 @@ export class GrafeoDB {
   }
 
   /** Executes a GQL query and returns results as an array of objects. */
-  async execute(query: string): Promise<Record<string, unknown>[]> {
+  async execute(
+    query: string,
+    options?: LiteExecuteOptions,
+  ): Promise<Record<string, unknown>[]> {
     this.assertOpen();
-    const result = this.wasm!.execute(query);
+    const params = options?.params;
+    const result = params
+      ? this.wasm!.executeWithParams(query, params)
+      : this.wasm!.execute(query);
 
     if (this.persistence && isMutatingQuery(query)) {
       this.persistence.scheduleSave(() => this.wasm!.exportSnapshot());

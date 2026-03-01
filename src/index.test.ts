@@ -143,6 +143,97 @@ describe('GrafeoDB', () => {
     });
   });
 
+  describe('execute() with params', () => {
+    it('passes params through to WASM executeWithParams', async () => {
+      await db.execute("INSERT (:Person {name: 'Alice', age: 30})");
+      const results = await db.execute(
+        'MATCH (p:Person) RETURN p.name, p.age',
+        { params: { name: 'Alice' } },
+      );
+      expect(results).toHaveLength(1);
+    });
+
+    it('passes language + params to executeWithLanguageAndParams', async () => {
+      await db.execute("INSERT (:Person {name: 'Bob'})");
+      const results = await db.execute(
+        'MATCH (p:Person) RETURN p.name',
+        { language: 'cypher', params: { name: 'Bob' } },
+      );
+      expect(results).toHaveLength(1);
+    });
+
+    it('supports sql language', async () => {
+      await db.execute("INSERT (:Person {name: 'Alice'})");
+      const results = await db.execute(
+        'MATCH (p:Person) RETURN p.name',
+        { language: 'sql' },
+      );
+      expect(results).toHaveLength(1);
+    });
+  });
+
+  describe('executeRaw() with language', () => {
+    it('dispatches to executeRawWithLanguage', async () => {
+      await db.execute("INSERT (:Person {name: 'Alice'})");
+      const result = await db.executeRaw(
+        'MATCH (p:Person) RETURN p.name',
+        { language: 'cypher' },
+      );
+      expect(result.columns).toContain('p.name');
+      expect(result.rows).toHaveLength(1);
+    });
+  });
+
+  describe('text search', () => {
+    it('createTextIndex does not throw', async () => {
+      await expect(db.createTextIndex('Person', 'name')).resolves.toBeUndefined();
+    });
+
+    it('dropTextIndex returns boolean', async () => {
+      const result = await db.dropTextIndex('Person', 'name');
+      expect(typeof result).toBe('boolean');
+    });
+
+    it('rebuildTextIndex does not throw', async () => {
+      await expect(db.rebuildTextIndex('Person', 'name')).resolves.toBeUndefined();
+    });
+
+    it('textSearch returns array', async () => {
+      const results = await db.textSearch('Person', 'name', 'Alice', 5);
+      expect(Array.isArray(results)).toBe(true);
+    });
+
+    it('hybridSearch returns array', async () => {
+      const results = await db.hybridSearch('Person', 'name', 'embedding', 'Alice', 5);
+      expect(Array.isArray(results)).toBe(true);
+    });
+
+    it('textSearch throws when feature missing', async () => {
+      const instance = await GrafeoDB.create();
+      // Override with a non-function to simulate WASM built without text-index
+      const wasm = (instance as unknown as { wasm: Record<string, unknown> }).wasm;
+      Object.defineProperty(wasm, 'textSearch', { value: undefined, configurable: true });
+
+      await expect(
+        instance.textSearch('Person', 'name', 'Alice', 5),
+      ).rejects.toThrow("textSearch() requires @grafeo-db/wasm built with the 'text-index' feature");
+
+      await instance.close();
+    });
+
+    it('hybridSearch throws when feature missing', async () => {
+      const instance = await GrafeoDB.create();
+      const wasm = (instance as unknown as { wasm: Record<string, unknown> }).wasm;
+      Object.defineProperty(wasm, 'hybridSearch', { value: undefined, configurable: true });
+
+      await expect(
+        instance.hybridSearch('Person', 'name', 'embedding', 'Alice', 5),
+      ).rejects.toThrow("hybridSearch() requires @grafeo-db/wasm built with the 'hybrid-search' feature");
+
+      await instance.close();
+    });
+  });
+
   describe('changesSince()', () => {
     it('returns empty array (not yet implemented)', async () => {
       const changes = await db.changesSince(0);

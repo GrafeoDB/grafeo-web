@@ -1,5 +1,5 @@
 /** Supported query languages. */
-export type QueryLanguage = 'gql' | 'cypher' | 'sparql' | 'graphql' | 'gremlin';
+export type QueryLanguage = 'gql' | 'cypher' | 'sparql' | 'graphql' | 'gremlin' | 'sql';
 
 /** Options for creating a GrafeoDB instance. */
 export interface CreateOptions {
@@ -15,6 +15,14 @@ export interface CreateOptions {
 export interface ExecuteOptions {
   /** Query language to use. Default: 'gql'. */
   language?: QueryLanguage;
+  /** Named parameters to bind into the query (e.g. `{ name: 'Alice' }` for `$name`). */
+  params?: Record<string, unknown>;
+}
+
+/** Options for lite query execution (GQL only, no language selection). */
+export interface LiteExecuteOptions {
+  /** Named parameters to bind into the query. */
+  params?: Record<string, unknown>;
 }
 
 /** IndexedDB storage usage statistics. */
@@ -40,6 +48,12 @@ export interface Change {
   type: 'insert' | 'update' | 'delete';
   timestamp: number;
   data: unknown;
+}
+
+/** A scored search result from text or hybrid search. */
+export interface SearchResult {
+  id: number;
+  score: number;
 }
 
 /** Raw query result with column metadata. */

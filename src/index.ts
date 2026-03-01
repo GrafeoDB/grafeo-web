@@ -11,6 +11,7 @@ import type {
   ExecuteOptions,
   QueryLanguage,
   RawQueryResult,
+  SearchResult,
   StorageStats,
 } from './types';
 
@@ -21,6 +22,7 @@ export type {
   ExecuteOptions,
   QueryLanguage,
   RawQueryResult,
+  SearchResult,
   StorageStats,
 };
 
@@ -123,31 +125,45 @@ export class GrafeoDB {
     }
 
     const lang = options?.language;
-    const result = lang && lang !== 'gql'
-      ? this.wasm!.executeWithLanguage(query, lang)
-      : this.wasm!.execute(query);
+    const params = options?.params;
+    const hasLang = lang && lang !== 'gql';
+
+    let result: Record<string, unknown>[];
+    if (hasLang && params) {
+      result = this.wasm!.executeWithLanguageAndParams(query, lang, params) as Record<string, unknown>[];
+    } else if (hasLang) {
+      result = this.wasm!.executeWithLanguage(query, lang) as Record<string, unknown>[];
+    } else if (params) {
+      result = this.wasm!.executeWithParams(query, params) as Record<string, unknown>[];
+    } else {
+      result = this.wasm!.execute(query) as Record<string, unknown>[];
+    }
 
     if (this.persistence && isMutatingQuery(query)) {
       this.persistence.scheduleSave(() => this.wasm!.exportSnapshot());
     }
 
-    return result as Record<string, unknown>[];
+    return result;
   }
 
   /**
    * Executes a query and returns raw columns, rows, and metadata.
    *
    * @param query - The query string.
+   * @param options - Optional execution options (language selection).
    * @returns Raw result with columns, rows, and optional execution time.
    */
-  async executeRaw(query: string): Promise<RawQueryResult> {
+  async executeRaw(query: string, options?: ExecuteOptions): Promise<RawQueryResult> {
     this.assertOpen();
 
     if (this.proxy) {
-      return this.proxy.executeRaw(query);
+      return this.proxy.executeRaw(query, options);
     }
 
-    const result = this.wasm!.executeRaw(query);
+    const lang = options?.language;
+    const result = lang && lang !== 'gql'
+      ? this.wasm!.executeRawWithLanguage(query, lang)
+      : this.wasm!.executeRaw(query);
 
     if (this.persistence && isMutatingQuery(query)) {
       this.persistence.scheduleSave(() => this.wasm!.exportSnapshot());
@@ -250,6 +266,77 @@ export class GrafeoDB {
     return [];
   }
 
+  /** Creates a BM25 text index on a label/property. Requires 'text-index' WASM feature. */
+  async createTextIndex(label: string, property: string): Promise<void> {
+    this.assertOpen();
+    if (this.proxy) {
+      return this.proxy.createTextIndex(label, property);
+    }
+    this.assertFeature('createTextIndex', 'text-index');
+    this.wasm!.createTextIndex(label, property);
+    if (this.persistence) {
+      this.persistence.scheduleSave(() => this.wasm!.exportSnapshot());
+    }
+  }
+
+  /** Drops a text index. Returns true if one existed. Requires 'text-index' WASM feature. */
+  async dropTextIndex(label: string, property: string): Promise<boolean> {
+    this.assertOpen();
+    if (this.proxy) {
+      return this.proxy.dropTextIndex(label, property);
+    }
+    this.assertFeature('dropTextIndex', 'text-index');
+    const existed = this.wasm!.dropTextIndex(label, property);
+    if (this.persistence) {
+      this.persistence.scheduleSave(() => this.wasm!.exportSnapshot());
+    }
+    return existed;
+  }
+
+  /** Rebuilds a text index. Requires 'text-index' WASM feature. */
+  async rebuildTextIndex(label: string, property: string): Promise<void> {
+    this.assertOpen();
+    if (this.proxy) {
+      return this.proxy.rebuildTextIndex(label, property);
+    }
+    this.assertFeature('rebuildTextIndex', 'text-index');
+    this.wasm!.rebuildTextIndex(label, property);
+    if (this.persistence) {
+      this.persistence.scheduleSave(() => this.wasm!.exportSnapshot());
+    }
+  }
+
+  /** Full-text search returning scored results. Requires 'text-index' WASM feature. */
+  async textSearch(
+    label: string,
+    property: string,
+    query: string,
+    k: number,
+  ): Promise<SearchResult[]> {
+    this.assertOpen();
+    if (this.proxy) {
+      return this.proxy.textSearch(label, property, query, k);
+    }
+    this.assertFeature('textSearch', 'text-index');
+    return this.wasm!.textSearch(label, property, query, k);
+  }
+
+  /** Combined BM25 + vector search. Requires 'hybrid-search' WASM feature. */
+  async hybridSearch(
+    label: string,
+    textProp: string,
+    vectorProp: string,
+    queryText: string,
+    k: number,
+  ): Promise<SearchResult[]> {
+    this.assertOpen();
+    if (this.proxy) {
+      return this.proxy.hybridSearch(label, textProp, vectorProp, queryText, k);
+    }
+    this.assertFeature('hybridSearch', 'hybrid-search');
+    return this.wasm!.hybridSearch(label, textProp, vectorProp, queryText, k);
+  }
+
   /** Releases WASM memory and closes any open resources. */
   async close(): Promise<void> {
     if (this.closed) return;
@@ -275,6 +362,14 @@ export class GrafeoDB {
   private assertOpen(): void {
     if (this.closed) {
       throw new Error('Database is closed');
+    }
+  }
+
+  private assertFeature(methodName: string, featureName: string): void {
+    if (typeof (this.wasm as unknown as Record<string, unknown>)[methodName] !== 'function') {
+      throw new Error(
+        `${methodName}() requires @grafeo-db/wasm built with the '${featureName}' feature`,
+      );
     }
   }
 }
