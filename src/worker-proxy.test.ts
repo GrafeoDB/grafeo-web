@@ -171,6 +171,20 @@ describe('WorkerProxy', () => {
       expect(lastCall.args).toEqual(['Person', 'name']);
     });
 
+    it('sends dropTextIndex and resolves with boolean', async () => {
+      const promise = proxy.dropTextIndex('Person', 'name');
+      respondToLast(true);
+
+      const result = await promise;
+      expect(result).toBe(true);
+    });
+
+    it('sends rebuildTextIndex and resolves', async () => {
+      const promise = proxy.rebuildTextIndex('Person', 'name');
+      respondToLast(undefined);
+      await expect(promise).resolves.toBeUndefined();
+    });
+
     it('sends textSearch and resolves with results', async () => {
       const mockResults = [{ id: 1, score: 0.95 }];
       const promise = proxy.textSearch('Person', 'name', 'Alice', 5);

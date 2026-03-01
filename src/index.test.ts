@@ -17,6 +17,12 @@ describe('GrafeoDB', () => {
     await db.close();
   });
 
+  describe('version()', () => {
+    it('returns the WASM engine version', () => {
+      expect(typeof GrafeoDB.version()).toBe('string');
+    });
+  });
+
   describe('create()', () => {
     it('creates an in-memory database', async () => {
       const instance = await GrafeoDB.create();
@@ -208,6 +214,25 @@ describe('GrafeoDB', () => {
       expect(Array.isArray(results)).toBe(true);
     });
 
+    it('createTextIndex triggers persistence when persisted', async () => {
+      const pdb = await GrafeoDB.create({ persist: 'text-idx-test' });
+      await expect(pdb.createTextIndex('Person', 'name')).resolves.toBeUndefined();
+      await pdb.close();
+    });
+
+    it('dropTextIndex triggers persistence when persisted', async () => {
+      const pdb = await GrafeoDB.create({ persist: 'text-idx-test2' });
+      const result = await pdb.dropTextIndex('Person', 'name');
+      expect(typeof result).toBe('boolean');
+      await pdb.close();
+    });
+
+    it('rebuildTextIndex triggers persistence when persisted', async () => {
+      const pdb = await GrafeoDB.create({ persist: 'text-idx-test3' });
+      await expect(pdb.rebuildTextIndex('Person', 'name')).resolves.toBeUndefined();
+      await pdb.close();
+    });
+
     it('textSearch throws when feature missing', async () => {
       const instance = await GrafeoDB.create();
       // Override with a non-function to simulate WASM built without text-index
@@ -246,5 +271,108 @@ describe('GrafeoDB', () => {
       const stats = await db.storageStats();
       expect(stats).toEqual({ bytesUsed: 0, quota: 0 });
     });
+  });
+});
+
+// Worker-mode tests for proxy delegation branches
+describe('GrafeoDB (worker mode)', () => {
+  interface MockWorkerInstance {
+    postMessage: ReturnType<typeof vi.fn>;
+    terminate: ReturnType<typeof vi.fn>;
+    onmessage: ((event: MessageEvent) => void) | null;
+    onerror: ((event: ErrorEvent) => void) | null;
+  }
+
+  let mockWorker: MockWorkerInstance;
+
+  beforeEach(() => {
+    vi.stubGlobal(
+      'Worker',
+      vi.fn(function () {
+        mockWorker = {
+          postMessage: vi.fn(),
+          terminate: vi.fn(),
+          onmessage: null,
+          onerror: null,
+        };
+        return mockWorker;
+      }),
+    );
+  });
+
+  function respondToLast(result?: unknown, error?: string): void {
+    const calls = mockWorker.postMessage.mock.calls;
+    const lastMsg = calls[calls.length - 1][0] as { id: number };
+    const response = { id: lastMsg.id, result, error };
+    mockWorker.onmessage?.({ data: response } as MessageEvent);
+  }
+
+  async function createWorkerDb(): Promise<Awaited<ReturnType<typeof GrafeoDB.create>>> {
+    const initPromise = GrafeoDB.create({ worker: true });
+    respondToLast(true);
+    return initPromise;
+  }
+
+  it('delegates createTextIndex through proxy', async () => {
+    const wdb = await createWorkerDb();
+    const promise = wdb.createTextIndex('Person', 'name');
+    respondToLast(undefined);
+    await promise;
+
+    const lastCall = mockWorker.postMessage.mock.calls.at(-1)![0];
+    expect(lastCall.method).toBe('createTextIndex');
+
+    const closePromise = wdb.close();
+    respondToLast(undefined);
+    await closePromise;
+  });
+
+  it('delegates dropTextIndex through proxy', async () => {
+    const wdb = await createWorkerDb();
+    const promise = wdb.dropTextIndex('Person', 'name');
+    respondToLast(true);
+    const result = await promise;
+    expect(result).toBe(true);
+
+    const closePromise = wdb.close();
+    respondToLast(undefined);
+    await closePromise;
+  });
+
+  it('delegates rebuildTextIndex through proxy', async () => {
+    const wdb = await createWorkerDb();
+    const promise = wdb.rebuildTextIndex('Person', 'name');
+    respondToLast(undefined);
+    await promise;
+
+    const closePromise = wdb.close();
+    respondToLast(undefined);
+    await closePromise;
+  });
+
+  it('delegates textSearch through proxy', async () => {
+    const wdb = await createWorkerDb();
+    const mockResults = [{ id: 1, score: 0.9 }];
+    const promise = wdb.textSearch('Person', 'name', 'Alice', 5);
+    respondToLast(mockResults);
+    const result = await promise;
+    expect(result).toEqual(mockResults);
+
+    const closePromise = wdb.close();
+    respondToLast(undefined);
+    await closePromise;
+  });
+
+  it('delegates hybridSearch through proxy', async () => {
+    const wdb = await createWorkerDb();
+    const mockResults = [{ id: 2, score: 0.8 }];
+    const promise = wdb.hybridSearch('Person', 'name', 'vec', 'Alice', 5);
+    respondToLast(mockResults);
+    const result = await promise;
+    expect(result).toEqual(mockResults);
+
+    const closePromise = wdb.close();
+    respondToLast(undefined);
+    await closePromise;
   });
 });
