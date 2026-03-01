@@ -133,6 +133,63 @@ describe('WorkerProxy', () => {
     });
   });
 
+  describe('executeRaw() with language', () => {
+    it('sends executeRaw with options', async () => {
+      const mockResult = {
+        columns: ['p.name'],
+        rows: [['Alice']],
+        executionTimeMs: 0.5,
+      };
+      const promise = proxy.executeRaw('MATCH (p) RETURN p.name', {
+        language: 'cypher',
+      });
+      respondToLast(mockResult);
+
+      const result = await promise;
+      expect(result).toEqual(mockResult);
+
+      const lastCall =
+        mockWorker.postMessage.mock.calls[
+          mockWorker.postMessage.mock.calls.length - 1
+        ][0];
+      expect(lastCall.method).toBe('executeRaw');
+      expect(lastCall.args[1]).toEqual({ language: 'cypher' });
+    });
+  });
+
+  describe('text/hybrid search proxy', () => {
+    it('sends createTextIndex and resolves', async () => {
+      const promise = proxy.createTextIndex('Person', 'name');
+      respondToLast(undefined);
+      await expect(promise).resolves.toBeUndefined();
+
+      const lastCall =
+        mockWorker.postMessage.mock.calls[
+          mockWorker.postMessage.mock.calls.length - 1
+        ][0];
+      expect(lastCall.method).toBe('createTextIndex');
+      expect(lastCall.args).toEqual(['Person', 'name']);
+    });
+
+    it('sends textSearch and resolves with results', async () => {
+      const mockResults = [{ id: 1, score: 0.95 }];
+      const promise = proxy.textSearch('Person', 'name', 'Alice', 5);
+      respondToLast(mockResults);
+
+      const result = await promise;
+      expect(result).toEqual(mockResults);
+    });
+
+    it('sends hybridSearch and resolves with results', async () => {
+      const mockResults = [{ id: 2, score: 0.87 }];
+      const promise = proxy.hybridSearch('Person', 'name', 'embedding', 'Alice', 5);
+      respondToLast(mockResults);
+
+      const result = await promise;
+      expect(result).toEqual(mockResults);
+    });
+  });
+
   describe('error handling', () => {
     it('rejects when worker responds with error', async () => {
       const promise = proxy.execute('BAD QUERY');

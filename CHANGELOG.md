@@ -2,13 +2,35 @@
 
 All notable changes to `@grafeo-db/web`.
 
+## [0.5.10] - 2026-03-01
+
+_Align with Grafeo Core 0.5.10_
+
+### Added
+
+- **Parameterized queries**: `execute(query, { params: { name: 'Alice' } })` binds `$name`-style parameters via WASM `executeWithParams` / `executeWithLanguageAndParams`
+- **`executeRaw()` with language**: now accepts an optional `ExecuteOptions` parameter for language selection, dispatching to `executeRawWithLanguage`
+- **`'sql'` query language**: added to `QueryLanguage` type and supported in `execute()` / `executeRaw()`
+- **Text index methods** (requires WASM `text-index` feature): `createTextIndex()`, `dropTextIndex()`, `rebuildTextIndex()`, `textSearch()`
+- **Hybrid search** (requires WASM `hybrid-search` feature): `hybridSearch()` combining BM25 text + vector scoring
+- **`SearchResult` type**: `{ id: number; score: number }` returned by `textSearch` and `hybridSearch`
+- **`LiteExecuteOptions` type**: params-only options for the lite build
+- **Feature-gate errors**: descriptive messages when calling text/hybrid methods on a WASM binary built without the required feature
+- **Lite params support**: `GrafeoDB.execute(query, { params })` now works in the lite build
+
+### Changed
+
+- **`@grafeo-db/wasm`**: dependency range covers 0.5.x (was `^0.5.0`)
+- **WASM type declarations**: updated from v0.5.0 to v0.5.10 surface (13 new methods)
+- Worker and proxy layers updated to route all new methods
+
 ## [0.5.1] - 2026-02-12
 
 _Version Alignment with Grafeo Core_
 
 ### Changed
 
-- **Lockstep versioning**: `@grafeo-db/web` now follows the same version number as the core `grafeo` engine, making compatibility obvious — web 0.5.1 = grafeo 0.5.1
+- **Lockstep versioning**: `@grafeo-db/web` now follows the same version number as the core `grafeo` engine, making compatibility obvious - web 0.5.1 = grafeo 0.5.1
 
 ## [0.5.0] - 2026-02-11
 
@@ -22,7 +44,7 @@ _Upgrade to Grafeo WASM 0.5.0_
 
 ## [0.2.1] - 2026-02-15
 
-_Release Prep — Framework Parity, CI, Demo_
+_Release Prep - Framework Parity, CI, Demo_
 
 ### Added
 
@@ -43,7 +65,7 @@ _Release Prep — Framework Parity, CI, Demo_
 
 ## [0.2.0] - 2026-02-08
 
-_Upgrade to Grafeo WASM 0.4.3 — Full API Support_
+_Upgrade to Grafeo WASM 0.4.3 - Full API Support_
 
 ### Added
 
@@ -53,7 +75,7 @@ _Upgrade to Grafeo WASM 0.4.3 — Full API Support_
 
 ### Changed
 
-- **WASM 0.4.3**: upgraded from 0.4.2 — includes `executeWithLanguage`, `exportSnapshot`/`importSnapshot`, and `schema`
+- **WASM 0.4.3**: upgraded from 0.4.2 - includes `executeWithLanguage`, `exportSnapshot`/`importSnapshot`, and `schema`
 - **`importSnapshot` is now static**: creates a new `Database` instance from snapshot bytes (was an instance method). This changes the internal persistence restore and `import()` flows
 - Mock updated to match 0.4.3 API surface (`executeWithLanguage`, `schema`, static `importSnapshot`)
 

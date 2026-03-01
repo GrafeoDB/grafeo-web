@@ -64,7 +64,7 @@ export class Database {
     language: string,
   ): Record<string, unknown>[] {
     this.assertNotFreed();
-    const supported = ['gql', 'cypher', 'sparql', 'gremlin', 'graphql'];
+    const supported = ['gql', 'cypher', 'sparql', 'gremlin', 'graphql', 'sql'];
     if (!supported.includes(language)) {
       throw new Error(
         `Unknown query language: '${language}'. Supported: ${supported.join(', ')}`,
@@ -72,6 +72,65 @@ export class Database {
     }
     // In the mock, all languages delegate to the same GQL-like parser
     return this.execute(query);
+  }
+
+  executeWithParams(
+    query: string,
+    _params: object,
+  ): Record<string, unknown>[] {
+    this.assertNotFreed();
+    return this.execute(query);
+  }
+
+  executeWithLanguageAndParams(
+    query: string,
+    language: string,
+    _params: object,
+  ): Record<string, unknown>[] {
+    this.assertNotFreed();
+    return this.executeWithLanguage(query, language);
+  }
+
+  executeRawWithLanguage(
+    query: string,
+    _language: string,
+  ): { columns: string[]; rows: unknown[][]; executionTimeMs?: number } {
+    this.assertNotFreed();
+    return this.executeRaw(query);
+  }
+
+  createTextIndex(_label: string, _property: string): void {
+    this.assertNotFreed();
+  }
+
+  dropTextIndex(_label: string, _property: string): boolean {
+    this.assertNotFreed();
+    return false;
+  }
+
+  rebuildTextIndex(_label: string, _property: string): void {
+    this.assertNotFreed();
+  }
+
+  textSearch(
+    _label: string,
+    _property: string,
+    _query: string,
+    _k: number,
+  ): { id: number; score: number }[] {
+    this.assertNotFreed();
+    return [];
+  }
+
+  hybridSearch(
+    _label: string,
+    _textProp: string,
+    _vectorProp: string,
+    _queryText: string,
+    _k: number,
+  ): { id: number; score: number }[] {
+    this.assertNotFreed();
+    return [];
   }
 
   nodeCount(): number {
@@ -95,7 +154,7 @@ export class Database {
   }
 
   static version(): string {
-    return '0.5.0-mock';
+    return '0.5.10-mock';
   }
 
   exportSnapshot(): Uint8Array {

@@ -1,7 +1,7 @@
 /**
  * Type declarations for @grafeo-db/wasm.
  *
- * These mirror the wasm-bindgen generated types from the WASM crate (v0.5.0).
+ * These mirror the wasm-bindgen generated types from the WASM crate (v0.5.10).
  * Once @grafeo-db/wasm is published to npm with its own types, this file
  * can be removed.
  */
@@ -25,12 +25,61 @@ declare module '@grafeo-db/wasm' {
     /**
      * Executes a query using a specific query language.
      *
-     * Supported languages: "gql", "cypher", "sparql", "gremlin", "graphql".
+     * Supported languages: "gql", "cypher", "sparql", "gremlin", "graphql", "sql".
      */
     executeWithLanguage(
       query: string,
       language: string,
     ): Record<string, unknown>[];
+
+    /** Executes a GQL query with named parameter substitution. */
+    executeWithParams(
+      query: string,
+      params: object,
+    ): Record<string, unknown>[];
+
+    /** Executes a query with a specific language and named parameters. */
+    executeWithLanguageAndParams(
+      query: string,
+      language: string,
+      params: object,
+    ): Record<string, unknown>[];
+
+    /** Executes a query using a specific language and returns raw columns/rows. */
+    executeRawWithLanguage(
+      query: string,
+      language: string,
+    ): {
+      columns: string[];
+      rows: unknown[][];
+      executionTimeMs?: number;
+    };
+
+    /** Creates a BM25 text index on a label/property. Requires 'text-index' feature. */
+    createTextIndex(label: string, property: string): void;
+
+    /** Drops a text index. Returns true if one existed. Requires 'text-index' feature. */
+    dropTextIndex(label: string, property: string): boolean;
+
+    /** Rebuilds a text index. Requires 'text-index' feature. */
+    rebuildTextIndex(label: string, property: string): void;
+
+    /** Full-text search returning scored results. Requires 'text-index' feature. */
+    textSearch(
+      label: string,
+      property: string,
+      query: string,
+      k: number,
+    ): { id: number; score: number }[];
+
+    /** Combined BM25 + vector search. Requires 'hybrid-search' feature. */
+    hybridSearch(
+      label: string,
+      textProp: string,
+      vectorProp: string,
+      queryText: string,
+      k: number,
+    ): { id: number; score: number }[];
 
     /** Returns the number of nodes in the database. */
     nodeCount(): number;

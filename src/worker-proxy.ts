@@ -3,6 +3,7 @@ import type {
   DatabaseSnapshot,
   ExecuteOptions,
   RawQueryResult,
+  SearchResult,
   StorageStats,
   WorkerRequest,
   WorkerResponse,
@@ -88,8 +89,8 @@ export class WorkerProxy {
     >[];
   }
 
-  async executeRaw(query: string): Promise<RawQueryResult> {
-    return (await this.send('executeRaw', [query])) as RawQueryResult;
+  async executeRaw(query: string, options?: ExecuteOptions): Promise<RawQueryResult> {
+    return (await this.send('executeRaw', [query, options])) as RawQueryResult;
   }
 
   async nodeCount(): Promise<number> {
@@ -118,6 +119,37 @@ export class WorkerProxy {
 
   async clear(): Promise<void> {
     await this.send('clear');
+  }
+
+  async createTextIndex(label: string, property: string): Promise<void> {
+    await this.send('createTextIndex', [label, property]);
+  }
+
+  async dropTextIndex(label: string, property: string): Promise<boolean> {
+    return (await this.send('dropTextIndex', [label, property])) as boolean;
+  }
+
+  async rebuildTextIndex(label: string, property: string): Promise<void> {
+    await this.send('rebuildTextIndex', [label, property]);
+  }
+
+  async textSearch(
+    label: string,
+    property: string,
+    query: string,
+    k: number,
+  ): Promise<SearchResult[]> {
+    return (await this.send('textSearch', [label, property, query, k])) as SearchResult[];
+  }
+
+  async hybridSearch(
+    label: string,
+    textProp: string,
+    vectorProp: string,
+    queryText: string,
+    k: number,
+  ): Promise<SearchResult[]> {
+    return (await this.send('hybridSearch', [label, textProp, vectorProp, queryText, k])) as SearchResult[];
   }
 
   async close(): Promise<void> {
