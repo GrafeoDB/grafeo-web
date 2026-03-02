@@ -2,6 +2,14 @@
 
 All notable changes to `@grafeo-db/web`.
 
+## [0.5.11] - 2026-03-02
+
+_Align with Grafeo Core 0.5.11_
+
+### Changed
+
+- **Version bump**: lockstep alignment with grafeo core 0.5.11 (engine-level improvements: atomic snapshot restore, query translator fixes, EXISTS subquery support). No WASM API surface changes.
+
 ## [0.5.10] - 2026-03-01
 
 _Align with Grafeo Core 0.5.10_
