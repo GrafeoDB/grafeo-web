@@ -5,6 +5,7 @@ export default defineConfig({
   resolve: {
     alias: {
       '@grafeo-db/wasm': path.resolve(__dirname, 'src/__mocks__/wasm.ts'),
+      '@grafeo-db/wasm-lite': path.resolve(__dirname, 'src/__mocks__/wasm.ts'),
     },
   },
   test: {

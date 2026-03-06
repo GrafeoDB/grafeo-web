@@ -1,7 +1,10 @@
 /**
- * Type declarations for @grafeo-db/wasm.
+ * Type declarations for @grafeo-db/wasm and @grafeo-db/wasm-lite.
  *
  * These mirror the wasm-bindgen generated types from the WASM crate (v0.5.10).
+ * Both variants expose the same API surface; the lite variant simply omits
+ * multi-language and AI search features at the WASM level.
+ *
  * Once @grafeo-db/wasm is published to npm with its own types, this file
  * can be removed.
  */
@@ -118,6 +121,50 @@ declare module '@grafeo-db/wasm' {
     | WebAssembly.Module;
 
   /** Initialize the WASM module. Must be called before creating a Database. */
+  export default function init(
+    module_or_path?: InitInput | Promise<InitInput>,
+  ): Promise<InitOutput>;
+}
+
+/**
+ * Lite variant: GQL-only, smaller binary (~507 KB gzipped).
+ * Same API surface as @grafeo-db/wasm; AI search methods exist in the type
+ * but throw at runtime when the feature is not compiled in.
+ */
+declare module '@grafeo-db/wasm-lite' {
+  export class Database {
+    constructor();
+    execute(query: string): Record<string, unknown>[];
+    executeRaw(query: string): {
+      columns: string[];
+      rows: unknown[][];
+      executionTimeMs?: number;
+    };
+    executeWithParams(
+      query: string,
+      params: object,
+    ): Record<string, unknown>[];
+    nodeCount(): number;
+    edgeCount(): number;
+    schema(): unknown;
+    static version(): string;
+    exportSnapshot(): Uint8Array;
+    static importSnapshot(data: Uint8Array): Database;
+    free(): void;
+    [Symbol.dispose](): void;
+  }
+
+  export interface InitOutput {
+    readonly memory: WebAssembly.Memory;
+  }
+
+  export type InitInput =
+    | RequestInfo
+    | URL
+    | Response
+    | BufferSource
+    | WebAssembly.Module;
+
   export default function init(
     module_or_path?: InitInput | Promise<InitInput>,
   ): Promise<InitOutput>;

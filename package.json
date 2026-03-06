@@ -95,7 +95,8 @@
     "prepublishOnly": "npm run build"
   },
   "dependencies": {
-    "@grafeo-db/wasm": "^0.5"
+    "@grafeo-db/wasm": "^0.5",
+    "@grafeo-db/wasm-lite": "^0.5"
   },
   "peerDependencies": {
     "react": ">=19",

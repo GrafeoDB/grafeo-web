@@ -13,5 +13,5 @@ export default defineConfig({
   dts: true,
   clean: true,
   sourcemap: true,
-  external: ['@grafeo-db/wasm', 'react', 'vue', 'svelte'],
+  external: ['@grafeo-db/wasm', '@grafeo-db/wasm-lite', 'react', 'vue', 'svelte'],
 });
