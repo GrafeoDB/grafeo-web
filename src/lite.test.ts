@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-// Mock the WASM module before importing GrafeoDB
-vi.mock('@grafeo-db/wasm', () => import('./__mocks__/wasm'));
+// Mock the WASM lite module before importing GrafeoDB
+vi.mock('@grafeo-db/wasm-lite', () => import('./__mocks__/wasm'));
 
 const { GrafeoDB } = await import('./lite');
 type GrafeoDBInstance = Awaited<ReturnType<typeof GrafeoDB.create>>;

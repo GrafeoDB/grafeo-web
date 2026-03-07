@@ -1,8 +1,8 @@
-import { Database as WasmDatabase } from '@grafeo-db/wasm';
+import { Database as WasmDatabase } from '@grafeo-db/wasm-lite';
 
 import { PersistenceManager } from './persistence';
 import { isMutatingQuery } from './query-utils';
-import { ensureWasmInitialized } from './wasm-init';
+import { ensureLiteWasmInitialized } from './wasm-init-lite';
 import type {
   Change,
   CreateOptions,
@@ -18,8 +18,8 @@ export type { Change, CreateOptions, DatabaseSnapshot, LiteExecuteOptions, RawQu
  * A lightweight Grafeo database supporting GQL only.
  *
  * Identical API to the full `GrafeoDB` but uses a smaller WASM binary
- * (~400 KB gzipped vs ~800 KB) by excluding Cypher, SPARQL, GraphQL,
- * and Gremlin parsers.
+ * (~507 KB gzipped vs ~600 KB) by excluding AI search features,
+ * Cypher, SPARQL, GraphQL, and Gremlin parsers.
  *
  * @example
  * ```typescript
@@ -48,8 +48,7 @@ export class GrafeoDB {
    * @returns A ready-to-use database instance.
    */
   static async create(options?: CreateOptions): Promise<GrafeoDB> {
-    // TODO: When a lite WASM binary exists, import from '@grafeo-db/wasm/lite'
-    await ensureWasmInitialized();
+    await ensureLiteWasmInitialized();
 
     let persistence: PersistenceManager | null = null;
     let wasm: WasmDatabase;
