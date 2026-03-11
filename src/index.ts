@@ -9,10 +9,13 @@ import type {
   CreateOptions,
   DatabaseSnapshot,
   ExecuteOptions,
+  ImportRowsOptions,
   LpgEdge,
   LpgImportData,
   LpgImportResult,
   LpgNode,
+  MemoryUsage,
+  MmrSearchOptions,
   QueryLanguage,
   RawQueryResult,
   RdfImportData,
@@ -21,6 +24,9 @@ import type {
   RdfTriple,
   SearchResult,
   StorageStats,
+  VectorIndexOptions,
+  VectorResult,
+  VectorSearchOptions,
 } from './types';
 
 export type {
@@ -28,10 +34,13 @@ export type {
   CreateOptions,
   DatabaseSnapshot,
   ExecuteOptions,
+  ImportRowsOptions,
   LpgEdge,
   LpgImportData,
   LpgImportResult,
   LpgNode,
+  MemoryUsage,
+  MmrSearchOptions,
   QueryLanguage,
   RawQueryResult,
   RdfImportData,
@@ -40,6 +49,9 @@ export type {
   RdfTriple,
   SearchResult,
   StorageStats,
+  VectorIndexOptions,
+  VectorResult,
+  VectorSearchOptions,
 };
 
 /**
@@ -351,6 +363,112 @@ export class GrafeoDB {
     }
     this.assertFeature('hybridSearch', 'hybrid-search');
     return this.wasm!.hybridSearch(label, textProp, vectorProp, queryText, k);
+  }
+
+  /** Creates an HNSW vector index. Requires 'vector-index' WASM feature. */
+  async createVectorIndex(
+    label: string,
+    property: string,
+    options?: VectorIndexOptions,
+  ): Promise<void> {
+    this.assertOpen();
+    if (this.proxy) {
+      return this.proxy.createVectorIndex(label, property, options);
+    }
+    this.assertFeature('createVectorIndex', 'vector-index');
+    this.wasm!.createVectorIndex(label, property, options);
+    if (this.persistence) {
+      this.persistence.scheduleSave(() => this.wasm!.exportSnapshot());
+    }
+  }
+
+  /** Drops a vector index. Returns true if one existed. Requires 'vector-index' WASM feature. */
+  async dropVectorIndex(label: string, property: string): Promise<boolean> {
+    this.assertOpen();
+    if (this.proxy) {
+      return this.proxy.dropVectorIndex(label, property);
+    }
+    this.assertFeature('dropVectorIndex', 'vector-index');
+    const existed = this.wasm!.dropVectorIndex(label, property);
+    if (this.persistence) {
+      this.persistence.scheduleSave(() => this.wasm!.exportSnapshot());
+    }
+    return existed;
+  }
+
+  /** Rebuilds a vector index by re-scanning matching nodes. Requires 'vector-index' WASM feature. */
+  async rebuildVectorIndex(label: string, property: string): Promise<void> {
+    this.assertOpen();
+    if (this.proxy) {
+      return this.proxy.rebuildVectorIndex(label, property);
+    }
+    this.assertFeature('rebuildVectorIndex', 'vector-index');
+    this.wasm!.rebuildVectorIndex(label, property);
+    if (this.persistence) {
+      this.persistence.scheduleSave(() => this.wasm!.exportSnapshot());
+    }
+  }
+
+  /** k-NN vector search. Requires 'vector-index' WASM feature. */
+  async vectorSearch(
+    label: string,
+    property: string,
+    query: Float32Array,
+    k: number,
+    options?: VectorSearchOptions,
+  ): Promise<VectorResult[]> {
+    this.assertOpen();
+    if (this.proxy) {
+      return this.proxy.vectorSearch(label, property, query, k, options);
+    }
+    this.assertFeature('vectorSearch', 'vector-index');
+    return this.wasm!.vectorSearch(label, property, query, k, options) as VectorResult[];
+  }
+
+  /** MMR search for diverse results. Requires 'vector-index' WASM feature. */
+  async mmrSearch(
+    label: string,
+    property: string,
+    query: Float32Array,
+    k: number,
+    options?: MmrSearchOptions,
+  ): Promise<VectorResult[]> {
+    this.assertOpen();
+    if (this.proxy) {
+      return this.proxy.mmrSearch(label, property, query, k, options);
+    }
+    this.assertFeature('mmrSearch', 'vector-index');
+    return this.wasm!.mmrSearch(label, property, query, k, options) as VectorResult[];
+  }
+
+  /** Returns a hierarchical memory usage breakdown. */
+  async memoryUsage(): Promise<MemoryUsage> {
+    this.assertOpen();
+    if (this.proxy) {
+      return this.proxy.memoryUsage();
+    }
+    return this.wasm!.memoryUsage() as MemoryUsage;
+  }
+
+  /**
+   * Bulk-imports rows (array of objects) as nodes or edges.
+   * The browser equivalent of Python's `import_df()`.
+   *
+   * @returns The number of created entities.
+   */
+  async importRows(
+    rows: Record<string, unknown>[],
+    options: ImportRowsOptions,
+  ): Promise<number> {
+    this.assertOpen();
+    if (this.proxy) {
+      return this.proxy.importRows(rows, options);
+    }
+    const count = this.wasm!.importRows(rows, options);
+    if (this.persistence) {
+      this.persistence.scheduleSave(() => this.wasm!.exportSnapshot());
+    }
+    return count;
   }
 
   /**

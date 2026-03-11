@@ -105,6 +105,42 @@ declare module '@grafeo-db/wasm' {
       }>;
     }): { triples: number };
 
+    /** Creates an HNSW vector index. Requires 'vector-index' feature. */
+    createVectorIndex(label: string, property: string, options?: object): void;
+
+    /** Drops a vector index. Returns true if one existed. Requires 'vector-index' feature. */
+    dropVectorIndex(label: string, property: string): boolean;
+
+    /** Rebuilds a vector index by re-scanning all matching nodes. Requires 'vector-index' feature. */
+    rebuildVectorIndex(label: string, property: string): void;
+
+    /** k-NN vector search returning {id, distance} results. Requires 'vector-index' feature. */
+    vectorSearch(
+      label: string,
+      property: string,
+      query: Float32Array,
+      k: number,
+      options?: object,
+    ): { id: number; distance: number }[];
+
+    /** MMR search for diverse results. Requires 'vector-index' feature. */
+    mmrSearch(
+      label: string,
+      property: string,
+      query: Float32Array,
+      k: number,
+      options?: object,
+    ): { id: number; distance: number }[];
+
+    /** Returns a hierarchical memory usage breakdown. */
+    memoryUsage(): object;
+
+    /**
+     * Bulk-imports rows (array of objects) as nodes or edges.
+     * The WASM equivalent of Python's import_df().
+     */
+    importRows(rows: object[], options: object): number;
+
     /** Returns the number of nodes in the database. */
     nodeCount(): number;
 

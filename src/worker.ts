@@ -217,6 +217,77 @@ async function handleMessage(request: WorkerRequest): Promise<void> {
         break;
       }
 
+      case 'createVectorIndex': {
+        if (!db) throw new Error('Database not initialized');
+        const [label, property, options] = args as [string, string, object | undefined];
+        assertWorkerFeature(db, 'createVectorIndex', 'vector-index');
+        (db as unknown as Record<string, CallableFunction>).createVectorIndex(label, property, options);
+        if (persistence) {
+          persistence.scheduleSave(() => db!.exportSnapshot());
+        }
+        respond(id);
+        break;
+      }
+
+      case 'dropVectorIndex': {
+        if (!db) throw new Error('Database not initialized');
+        const [label, property] = args as [string, string];
+        assertWorkerFeature(db, 'dropVectorIndex', 'vector-index');
+        const existed = (db as unknown as Record<string, CallableFunction>).dropVectorIndex(label, property) as boolean;
+        if (persistence) {
+          persistence.scheduleSave(() => db!.exportSnapshot());
+        }
+        respond(id, existed);
+        break;
+      }
+
+      case 'rebuildVectorIndex': {
+        if (!db) throw new Error('Database not initialized');
+        const [label, property] = args as [string, string];
+        assertWorkerFeature(db, 'rebuildVectorIndex', 'vector-index');
+        (db as unknown as Record<string, CallableFunction>).rebuildVectorIndex(label, property);
+        if (persistence) {
+          persistence.scheduleSave(() => db!.exportSnapshot());
+        }
+        respond(id);
+        break;
+      }
+
+      case 'vectorSearch': {
+        if (!db) throw new Error('Database not initialized');
+        const [label, property, query, k, options] = args as [string, string, Float32Array, number, object | undefined];
+        assertWorkerFeature(db, 'vectorSearch', 'vector-index');
+        const result = (db as unknown as Record<string, CallableFunction>).vectorSearch(label, property, query, k, options);
+        respond(id, result);
+        break;
+      }
+
+      case 'mmrSearch': {
+        if (!db) throw new Error('Database not initialized');
+        const [label, property, query, k, options] = args as [string, string, Float32Array, number, object | undefined];
+        assertWorkerFeature(db, 'mmrSearch', 'vector-index');
+        const result = (db as unknown as Record<string, CallableFunction>).mmrSearch(label, property, query, k, options);
+        respond(id, result);
+        break;
+      }
+
+      case 'memoryUsage': {
+        if (!db) throw new Error('Database not initialized');
+        respond(id, db.memoryUsage());
+        break;
+      }
+
+      case 'importRows': {
+        if (!db) throw new Error('Database not initialized');
+        const [rows, options] = args as [object[], object];
+        const count = db.importRows(rows, options);
+        if (persistence) {
+          persistence.scheduleSave(() => db!.exportSnapshot());
+        }
+        respond(id, count);
+        break;
+      }
+
       case 'importLpg': {
         if (!db) throw new Error('Database not initialized');
         const data = args[0] as { nodes: unknown[]; edges: unknown[] };

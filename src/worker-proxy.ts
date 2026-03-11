@@ -2,13 +2,19 @@ import type {
   CreateOptions,
   DatabaseSnapshot,
   ExecuteOptions,
+  ImportRowsOptions,
   LpgImportData,
   LpgImportResult,
+  MemoryUsage,
+  MmrSearchOptions,
   RawQueryResult,
   RdfImportData,
   RdfImportResult,
   SearchResult,
   StorageStats,
+  VectorIndexOptions,
+  VectorResult,
+  VectorSearchOptions,
   WorkerRequest,
   WorkerResponse,
 } from './types';
@@ -154,6 +160,46 @@ export class WorkerProxy {
     k: number,
   ): Promise<SearchResult[]> {
     return (await this.send('hybridSearch', [label, textProp, vectorProp, queryText, k])) as SearchResult[];
+  }
+
+  async createVectorIndex(label: string, property: string, options?: VectorIndexOptions): Promise<void> {
+    await this.send('createVectorIndex', [label, property, options]);
+  }
+
+  async dropVectorIndex(label: string, property: string): Promise<boolean> {
+    return (await this.send('dropVectorIndex', [label, property])) as boolean;
+  }
+
+  async rebuildVectorIndex(label: string, property: string): Promise<void> {
+    await this.send('rebuildVectorIndex', [label, property]);
+  }
+
+  async vectorSearch(
+    label: string,
+    property: string,
+    query: Float32Array,
+    k: number,
+    options?: VectorSearchOptions,
+  ): Promise<VectorResult[]> {
+    return (await this.send('vectorSearch', [label, property, query, k, options])) as VectorResult[];
+  }
+
+  async mmrSearch(
+    label: string,
+    property: string,
+    query: Float32Array,
+    k: number,
+    options?: MmrSearchOptions,
+  ): Promise<VectorResult[]> {
+    return (await this.send('mmrSearch', [label, property, query, k, options])) as VectorResult[];
+  }
+
+  async memoryUsage(): Promise<MemoryUsage> {
+    return (await this.send('memoryUsage')) as MemoryUsage;
+  }
+
+  async importRows(rows: Record<string, unknown>[], options: ImportRowsOptions): Promise<number> {
+    return (await this.send('importRows', [rows, options])) as number;
   }
 
   async importLpg(data: LpgImportData): Promise<LpgImportResult> {

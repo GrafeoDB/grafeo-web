@@ -133,6 +133,62 @@ export class Database {
     return [];
   }
 
+  createVectorIndex(_label: string, _property: string, _options?: object): void {
+    this.assertNotFreed();
+  }
+
+  dropVectorIndex(_label: string, _property: string): boolean {
+    this.assertNotFreed();
+    return false;
+  }
+
+  rebuildVectorIndex(_label: string, _property: string): void {
+    this.assertNotFreed();
+  }
+
+  vectorSearch(
+    _label: string,
+    _property: string,
+    _query: Float32Array,
+    _k: number,
+    _options?: object,
+  ): { id: number; distance: number }[] {
+    this.assertNotFreed();
+    return [];
+  }
+
+  mmrSearch(
+    _label: string,
+    _property: string,
+    _query: Float32Array,
+    _k: number,
+    _options?: object,
+  ): { id: number; distance: number }[] {
+    this.assertNotFreed();
+    return [];
+  }
+
+  memoryUsage(): object {
+    this.assertNotFreed();
+    return {
+      total_bytes: 0,
+      store: { total_bytes: 0 },
+      indexes: { total_bytes: 0 },
+      mvcc: { total_bytes: 0 },
+      caches: { total_bytes: 0 },
+      string_pool: { total_bytes: 0 },
+      buffer_manager: { total_bytes: 0 },
+    };
+  }
+
+  importRows(
+    rows: Record<string, unknown>[],
+    _options: object,
+  ): number {
+    this.assertNotFreed();
+    return rows.length;
+  }
+
   importLpg(data: {
     nodes: Array<{ labels: string[]; properties?: Record<string, unknown> }>;
     edges: Array<{ source: number; target: number; type: string; properties?: Record<string, unknown> }>;
