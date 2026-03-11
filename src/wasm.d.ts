@@ -1,7 +1,7 @@
 /**
  * Type declarations for @grafeo-db/wasm and @grafeo-db/wasm-lite.
  *
- * These mirror the wasm-bindgen generated types from the WASM crate (v0.5.10).
+ * These mirror the wasm-bindgen generated types from the WASM crate (v0.5.19).
  * Both variants expose the same API surface; the lite variant simply omits
  * multi-language and AI search features at the WASM level.
  *
@@ -83,6 +83,27 @@ declare module '@grafeo-db/wasm' {
       queryText: string,
       k: number,
     ): { id: number; score: number }[];
+
+    /**
+     * Bulk-imports LPG nodes and edges in a single call.
+     * Edge source/target are zero-based indexes into the nodes array.
+     */
+    importLpg(data: {
+      nodes: Array<{ labels: string[]; properties?: Record<string, unknown> }>;
+      edges: Array<{ source: number; target: number; type: string; properties?: Record<string, unknown> }>;
+    }): { nodes: number; edges: number };
+
+    /**
+     * Bulk-imports RDF triples. Requires the 'rdf' WASM feature.
+     * Object can be an IRI string or { value, datatype?, language? }.
+     */
+    importRdf(data: {
+      triples: Array<{
+        subject: string;
+        predicate: string;
+        object: string | { value: string; datatype?: string; language?: string };
+      }>;
+    }): { triples: number };
 
     /** Returns the number of nodes in the database. */
     nodeCount(): number;

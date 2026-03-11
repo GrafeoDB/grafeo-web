@@ -133,6 +133,37 @@ export class Database {
     return [];
   }
 
+  importLpg(data: {
+    nodes: Array<{ labels: string[]; properties?: Record<string, unknown> }>;
+    edges: Array<{ source: number; target: number; type: string; properties?: Record<string, unknown> }>;
+  }): { nodes: number; edges: number } {
+    this.assertNotFreed();
+    const startIdx = this.nodes.length;
+    for (const node of data.nodes) {
+      this.nodes.push({ labels: node.labels, properties: node.properties ?? {} });
+    }
+    for (const edge of data.edges) {
+      this.edges.push({
+        type: edge.type,
+        sourceIdx: startIdx + edge.source,
+        targetIdx: startIdx + edge.target,
+        properties: edge.properties ?? {},
+      });
+    }
+    return { nodes: data.nodes.length, edges: data.edges.length };
+  }
+
+  importRdf(_data: {
+    triples: Array<{
+      subject: string;
+      predicate: string;
+      object: string | { value: string; datatype?: string; language?: string };
+    }>;
+  }): { triples: number } {
+    this.assertNotFreed();
+    return { triples: _data.triples.length };
+  }
+
   nodeCount(): number {
     this.assertNotFreed();
     return this.nodes.length;

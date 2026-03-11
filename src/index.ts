@@ -9,8 +9,16 @@ import type {
   CreateOptions,
   DatabaseSnapshot,
   ExecuteOptions,
+  LpgEdge,
+  LpgImportData,
+  LpgImportResult,
+  LpgNode,
   QueryLanguage,
   RawQueryResult,
+  RdfImportData,
+  RdfImportResult,
+  RdfLiteral,
+  RdfTriple,
   SearchResult,
   StorageStats,
 } from './types';
@@ -20,8 +28,16 @@ export type {
   CreateOptions,
   DatabaseSnapshot,
   ExecuteOptions,
+  LpgEdge,
+  LpgImportData,
+  LpgImportResult,
+  LpgNode,
   QueryLanguage,
   RawQueryResult,
+  RdfImportData,
+  RdfImportResult,
+  RdfLiteral,
+  RdfTriple,
   SearchResult,
   StorageStats,
 };
@@ -335,6 +351,45 @@ export class GrafeoDB {
     }
     this.assertFeature('hybridSearch', 'hybrid-search');
     return this.wasm!.hybridSearch(label, textProp, vectorProp, queryText, k);
+  }
+
+  /**
+   * Bulk-imports LPG nodes and edges in a single call.
+   *
+   * Edge `source`/`target` are zero-based indexes into the `nodes` array
+   * from the same import batch.
+   *
+   * @returns The count of imported nodes and edges.
+   */
+  async importLpg(data: LpgImportData): Promise<LpgImportResult> {
+    this.assertOpen();
+    if (this.proxy) {
+      return this.proxy.importLpg(data);
+    }
+    const result = this.wasm!.importLpg(data) as LpgImportResult;
+    if (this.persistence) {
+      this.persistence.scheduleSave(() => this.wasm!.exportSnapshot());
+    }
+    return result;
+  }
+
+  /**
+   * Bulk-imports RDF triples in a single call.
+   * Requires `@grafeo-db/wasm` built with the `rdf` feature.
+   *
+   * @returns The count of imported triples.
+   */
+  async importRdf(data: RdfImportData): Promise<RdfImportResult> {
+    this.assertOpen();
+    if (this.proxy) {
+      return this.proxy.importRdf(data);
+    }
+    this.assertFeature('importRdf', 'rdf');
+    const result = this.wasm!.importRdf(data) as RdfImportResult;
+    if (this.persistence) {
+      this.persistence.scheduleSave(() => this.wasm!.exportSnapshot());
+    }
+    return result;
   }
 
   /** Releases WASM memory and closes any open resources. */
