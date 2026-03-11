@@ -113,6 +113,70 @@ export interface RdfImportResult {
   triples: number;
 }
 
+/** Options for creating a vector index. */
+export interface VectorIndexOptions {
+  /** Number of dimensions. Inferred from data if omitted. */
+  dimensions?: number;
+  /** Distance metric: "cosine", "euclidean", "dot_product", or "manhattan". */
+  metric?: 'cosine' | 'euclidean' | 'dot_product' | 'manhattan';
+  /** HNSW links per node. */
+  m?: number;
+  /** HNSW build beam width. */
+  efConstruction?: number;
+}
+
+/** Options for vector k-NN search. */
+export interface VectorSearchOptions {
+  /** Search beam width (higher = more accurate but slower). */
+  ef?: number;
+  /** Property filters to apply before search. */
+  filters?: Record<string, unknown>;
+}
+
+/** Options for MMR (Maximal Marginal Relevance) search. */
+export interface MmrSearchOptions {
+  /** Number of candidates to fetch before re-ranking. */
+  fetchK?: number;
+  /** Balance between relevance (1.0) and diversity (0.0). */
+  lambda?: number;
+  /** Search beam width. */
+  ef?: number;
+  /** Property filters to apply before search. */
+  filters?: Record<string, unknown>;
+}
+
+/** A vector search result with node ID and distance. */
+export interface VectorResult {
+  id: number;
+  distance: number;
+}
+
+/** Options for importRows(). */
+export interface ImportRowsOptions {
+  /** Import mode: "nodes" or "edges". */
+  mode: 'nodes' | 'edges';
+  /** Node label(s). Required for mode "nodes". */
+  label?: string | string[];
+  /** Edge type. Required for mode "edges". */
+  edgeType?: string;
+  /** Source column name (default "source"). For mode "edges". */
+  source?: string;
+  /** Target column name (default "target"). For mode "edges". */
+  target?: string;
+}
+
+/** Hierarchical memory usage breakdown. */
+export interface MemoryUsage {
+  total_bytes: number;
+  store: { total_bytes: number };
+  indexes: { total_bytes: number };
+  mvcc: { total_bytes: number };
+  caches: { total_bytes: number };
+  string_pool: { total_bytes: number };
+  buffer_manager: { total_bytes: number };
+  [key: string]: unknown;
+}
+
 /** Message sent from main thread to worker. */
 export interface WorkerRequest {
   id: number;

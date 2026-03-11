@@ -2,6 +2,29 @@
 
 All notable changes to `@grafeo-db/web`.
 
+## [0.5.20] - 2026-03-11
+
+_Align with Grafeo Core 0.5.20_
+
+### Added
+
+- **Vector index methods** (requires `vector-index` WASM feature):
+  - `createVectorIndex(label, property, options?)`: create HNSW index with optional dimensions, metric, m, efConstruction
+  - `dropVectorIndex(label, property)`: remove a vector index
+  - `rebuildVectorIndex(label, property)`: drop and recreate, preserving config
+  - `vectorSearch(label, property, query, k, options?)`: k-NN search returning `[{id, distance}]`
+  - `mmrSearch(label, property, query, k, options?)`: MMR search for diverse results
+- **`memoryUsage()`**: returns a hierarchical breakdown of WASM heap usage (store, indexes, MVCC, caches, string pool, buffer manager)
+- **`importRows(rows, options)`**: bulk-import rows as nodes or edges, the browser equivalent of Python's `import_df()`
+- **New types**: `VectorIndexOptions`, `VectorSearchOptions`, `MmrSearchOptions`, `VectorResult`, `ImportRowsOptions`, `MemoryUsage`
+- Worker and proxy layers updated to route all new methods
+
+### Engine highlights (via Grafeo Core 0.5.20)
+
+- **WASM `memoryUsage()` and `importRows()`**: memory introspection and bulk row import now available in WebAssembly bindings
+- **SESSION SET GRAPH validation**: now errors when target graph does not exist
+
+
 ## [0.5.19] - 2026-03-11
 
 _Align with Grafeo Core 0.5.19_
@@ -10,7 +33,7 @@ _Align with Grafeo Core 0.5.19_
 
 - **`importLpg(data)`**: bulk-import LPG nodes and edges in a single call, with index-relative edge references and automatic persistence
 - **`importRdf(data)`**: bulk-import RDF triples (requires `rdf` WASM feature), supporting IRI subjects/predicates and typed/language-tagged literals
-- **`LpgImportData`**, **`LpgImportResult`**, **`RdfImportData`**, **`RdfImportResult`** types exported from `@grafeo-db/web`
+- **New types**: `LpgImportData`, `LpgImportResult`, `RdfImportData`, `RdfImportResult`
 - Worker and proxy layers updated to route `importLpg` and `importRdf`
 
 ### Changed

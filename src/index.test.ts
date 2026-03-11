@@ -259,6 +259,98 @@ describe('GrafeoDB', () => {
     });
   });
 
+  describe('vector index methods', () => {
+    it('createVectorIndex does not throw', async () => {
+      await expect(db.createVectorIndex('Doc', 'embedding')).resolves.toBeUndefined();
+    });
+
+    it('createVectorIndex accepts options', async () => {
+      await expect(
+        db.createVectorIndex('Doc', 'embedding', { dimensions: 384, metric: 'cosine' }),
+      ).resolves.toBeUndefined();
+    });
+
+    it('dropVectorIndex returns boolean', async () => {
+      const result = await db.dropVectorIndex('Doc', 'embedding');
+      expect(typeof result).toBe('boolean');
+    });
+
+    it('rebuildVectorIndex does not throw', async () => {
+      await expect(db.rebuildVectorIndex('Doc', 'embedding')).resolves.toBeUndefined();
+    });
+
+    it('vectorSearch returns array', async () => {
+      const results = await db.vectorSearch('Doc', 'embedding', new Float32Array([1, 0, 0]), 5);
+      expect(Array.isArray(results)).toBe(true);
+    });
+
+    it('mmrSearch returns array', async () => {
+      const results = await db.mmrSearch('Doc', 'embedding', new Float32Array([1, 0, 0]), 5);
+      expect(Array.isArray(results)).toBe(true);
+    });
+
+    it('vectorSearch throws when feature missing', async () => {
+      const instance = await GrafeoDB.create();
+      const wasm = (instance as unknown as { wasm: Record<string, unknown> }).wasm;
+      Object.defineProperty(wasm, 'vectorSearch', { value: undefined, configurable: true });
+
+      await expect(
+        instance.vectorSearch('Doc', 'embedding', new Float32Array([1]), 5),
+      ).rejects.toThrow("vectorSearch() requires @grafeo-db/wasm built with the 'vector-index' feature");
+
+      await instance.close();
+    });
+
+    it('mmrSearch throws when feature missing', async () => {
+      const instance = await GrafeoDB.create();
+      const wasm = (instance as unknown as { wasm: Record<string, unknown> }).wasm;
+      Object.defineProperty(wasm, 'mmrSearch', { value: undefined, configurable: true });
+
+      await expect(
+        instance.mmrSearch('Doc', 'embedding', new Float32Array([1]), 5),
+      ).rejects.toThrow("mmrSearch() requires @grafeo-db/wasm built with the 'vector-index' feature");
+
+      await instance.close();
+    });
+  });
+
+  describe('memoryUsage()', () => {
+    it('returns a memory breakdown object', async () => {
+      const usage = await db.memoryUsage();
+      expect(usage).toHaveProperty('total_bytes');
+      expect(usage).toHaveProperty('store');
+      expect(usage).toHaveProperty('indexes');
+    });
+  });
+
+  describe('importRows()', () => {
+    it('imports nodes from row objects', async () => {
+      const count = await db.importRows(
+        [{ name: 'Alice', age: 30 }, { name: 'Bob', age: 25 }],
+        { mode: 'nodes', label: 'Person' },
+      );
+      expect(count).toBe(2);
+    });
+
+    it('imports edges from row objects', async () => {
+      const count = await db.importRows(
+        [{ source: 0, target: 1, since: 2020 }],
+        { mode: 'edges', edgeType: 'KNOWS' },
+      );
+      expect(count).toBe(1);
+    });
+
+    it('triggers persistence when persisted', async () => {
+      const pdb = await GrafeoDB.create({ persist: 'rows-import-test' });
+      const count = await pdb.importRows(
+        [{ name: 'Alice' }],
+        { mode: 'nodes', label: 'Person' },
+      );
+      expect(count).toBe(1);
+      await pdb.close();
+    });
+  });
+
   describe('importLpg()', () => {
     it('bulk-imports nodes and edges', async () => {
       const result = await db.importLpg({
@@ -428,6 +520,61 @@ describe('GrafeoDB (worker mode)', () => {
     respondToLast(mockResults);
     const result = await promise;
     expect(result).toEqual(mockResults);
+
+    const closePromise = wdb.close();
+    respondToLast(undefined);
+    await closePromise;
+  });
+
+  it('delegates createVectorIndex through proxy', async () => {
+    const wdb = await createWorkerDb();
+    const promise = wdb.createVectorIndex('Doc', 'embedding', { dimensions: 384 });
+    respondToLast(undefined);
+    await promise;
+
+    const lastCall = mockWorker.postMessage.mock.calls.at(-1)![0];
+    expect(lastCall.method).toBe('createVectorIndex');
+
+    const closePromise = wdb.close();
+    respondToLast(undefined);
+    await closePromise;
+  });
+
+  it('delegates vectorSearch through proxy', async () => {
+    const wdb = await createWorkerDb();
+    const mockResults = [{ id: 1, distance: 0.12 }];
+    const promise = wdb.vectorSearch('Doc', 'embedding', new Float32Array([1, 0]), 5);
+    respondToLast(mockResults);
+    const result = await promise;
+    expect(result).toEqual(mockResults);
+
+    const closePromise = wdb.close();
+    respondToLast(undefined);
+    await closePromise;
+  });
+
+  it('delegates memoryUsage through proxy', async () => {
+    const wdb = await createWorkerDb();
+    const mockUsage = { total_bytes: 1024, store: { total_bytes: 512 } };
+    const promise = wdb.memoryUsage();
+    respondToLast(mockUsage);
+    const result = await promise;
+    expect(result).toEqual(mockUsage);
+
+    const closePromise = wdb.close();
+    respondToLast(undefined);
+    await closePromise;
+  });
+
+  it('delegates importRows through proxy', async () => {
+    const wdb = await createWorkerDb();
+    const promise = wdb.importRows([{ name: 'Alice' }], { mode: 'nodes', label: 'Person' });
+    respondToLast(1);
+    const result = await promise;
+    expect(result).toBe(1);
+
+    const lastCall = mockWorker.postMessage.mock.calls.at(-1)![0];
+    expect(lastCall.method).toBe('importRows');
 
     const closePromise = wdb.close();
     respondToLast(undefined);
