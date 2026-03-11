@@ -217,6 +217,29 @@ async function handleMessage(request: WorkerRequest): Promise<void> {
         break;
       }
 
+      case 'importLpg': {
+        if (!db) throw new Error('Database not initialized');
+        const data = args[0] as { nodes: unknown[]; edges: unknown[] };
+        const result = (db as unknown as Record<string, CallableFunction>).importLpg(data);
+        if (persistence) {
+          persistence.scheduleSave(() => db!.exportSnapshot());
+        }
+        respond(id, result);
+        break;
+      }
+
+      case 'importRdf': {
+        if (!db) throw new Error('Database not initialized');
+        assertWorkerFeature(db, 'importRdf', 'rdf');
+        const data = args[0] as { triples: unknown[] };
+        const result = (db as unknown as Record<string, CallableFunction>).importRdf(data);
+        if (persistence) {
+          persistence.scheduleSave(() => db!.exportSnapshot());
+        }
+        respond(id, result);
+        break;
+      }
+
       case 'close': {
         if (persistence && db) {
           await persistence.flush(() => db!.exportSnapshot());

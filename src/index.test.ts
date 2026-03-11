@@ -259,6 +259,77 @@ describe('GrafeoDB', () => {
     });
   });
 
+  describe('importLpg()', () => {
+    it('bulk-imports nodes and edges', async () => {
+      const result = await db.importLpg({
+        nodes: [
+          { labels: ['Person'], properties: { name: 'Alice', age: 30 } },
+          { labels: ['Person'], properties: { name: 'Bob', age: 25 } },
+        ],
+        edges: [
+          { source: 0, target: 1, type: 'KNOWS', properties: { since: 2020 } },
+        ],
+      });
+
+      expect(result).toEqual({ nodes: 2, edges: 1 });
+      expect(await db.nodeCount()).toBe(2);
+      expect(await db.edgeCount()).toBe(1);
+    });
+
+    it('imports nodes without properties', async () => {
+      const result = await db.importLpg({
+        nodes: [{ labels: ['Tag'] }],
+        edges: [],
+      });
+
+      expect(result).toEqual({ nodes: 1, edges: 0 });
+      expect(await db.nodeCount()).toBe(1);
+    });
+
+    it('triggers persistence when persisted', async () => {
+      const pdb = await GrafeoDB.create({ persist: 'lpg-import-test' });
+      const result = await pdb.importLpg({
+        nodes: [{ labels: ['Person'], properties: { name: 'Alice' } }],
+        edges: [],
+      });
+      expect(result.nodes).toBe(1);
+      await pdb.close();
+    });
+  });
+
+  describe('importRdf()', () => {
+    it('bulk-imports RDF triples', async () => {
+      const result = await db.importRdf({
+        triples: [
+          {
+            subject: 'http://example.org/Alice',
+            predicate: 'http://www.w3.org/1999/02/22-rdf-syntax-ns#type',
+            object: 'http://example.org/Person',
+          },
+          {
+            subject: 'http://example.org/Alice',
+            predicate: 'http://example.org/name',
+            object: { value: 'Alice' },
+          },
+        ],
+      });
+
+      expect(result).toEqual({ triples: 2 });
+    });
+
+    it('throws when rdf feature missing', async () => {
+      const instance = await GrafeoDB.create();
+      const wasm = (instance as unknown as { wasm: Record<string, unknown> }).wasm;
+      Object.defineProperty(wasm, 'importRdf', { value: undefined, configurable: true });
+
+      await expect(
+        instance.importRdf({ triples: [] }),
+      ).rejects.toThrow("importRdf() requires @grafeo-db/wasm built with the 'rdf' feature");
+
+      await instance.close();
+    });
+  });
+
   describe('changesSince()', () => {
     it('returns empty array (not yet implemented)', async () => {
       const changes = await db.changesSince(0);
@@ -357,6 +428,52 @@ describe('GrafeoDB (worker mode)', () => {
     respondToLast(mockResults);
     const result = await promise;
     expect(result).toEqual(mockResults);
+
+    const closePromise = wdb.close();
+    respondToLast(undefined);
+    await closePromise;
+  });
+
+  it('delegates importLpg through proxy', async () => {
+    const wdb = await createWorkerDb();
+    const mockResult = { nodes: 2, edges: 1 };
+    const promise = wdb.importLpg({
+      nodes: [
+        { labels: ['Person'], properties: { name: 'Alice' } },
+        { labels: ['Person'], properties: { name: 'Bob' } },
+      ],
+      edges: [{ source: 0, target: 1, type: 'KNOWS' }],
+    });
+    respondToLast(mockResult);
+    const result = await promise;
+    expect(result).toEqual(mockResult);
+
+    const lastCall = mockWorker.postMessage.mock.calls.at(-1)![0];
+    expect(lastCall.method).toBe('importLpg');
+
+    const closePromise = wdb.close();
+    respondToLast(undefined);
+    await closePromise;
+  });
+
+  it('delegates importRdf through proxy', async () => {
+    const wdb = await createWorkerDb();
+    const mockResult = { triples: 3 };
+    const promise = wdb.importRdf({
+      triples: [
+        {
+          subject: 'http://example.org/Alice',
+          predicate: 'http://www.w3.org/1999/02/22-rdf-syntax-ns#type',
+          object: 'http://example.org/Person',
+        },
+      ],
+    });
+    respondToLast(mockResult);
+    const result = await promise;
+    expect(result).toEqual(mockResult);
+
+    const lastCall = mockWorker.postMessage.mock.calls.at(-1)![0];
+    expect(lastCall.method).toBe('importRdf');
 
     const closePromise = wdb.close();
     respondToLast(undefined);

@@ -2,7 +2,11 @@ import type {
   CreateOptions,
   DatabaseSnapshot,
   ExecuteOptions,
+  LpgImportData,
+  LpgImportResult,
   RawQueryResult,
+  RdfImportData,
+  RdfImportResult,
   SearchResult,
   StorageStats,
   WorkerRequest,
@@ -150,6 +154,14 @@ export class WorkerProxy {
     k: number,
   ): Promise<SearchResult[]> {
     return (await this.send('hybridSearch', [label, textProp, vectorProp, queryText, k])) as SearchResult[];
+  }
+
+  async importLpg(data: LpgImportData): Promise<LpgImportResult> {
+    return (await this.send('importLpg', [data])) as LpgImportResult;
+  }
+
+  async importRdf(data: RdfImportData): Promise<RdfImportResult> {
+    return (await this.send('importRdf', [data])) as RdfImportResult;
   }
 
   async close(): Promise<void> {

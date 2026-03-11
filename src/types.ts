@@ -63,6 +63,56 @@ export interface RawQueryResult {
   executionTimeMs?: number;
 }
 
+/** A node to import via importLpg(). */
+export interface LpgNode {
+  labels: string[];
+  properties?: Record<string, unknown>;
+}
+
+/** An edge to import via importLpg(). Source/target are zero-based indexes into the nodes array. */
+export interface LpgEdge {
+  source: number;
+  target: number;
+  type: string;
+  properties?: Record<string, unknown>;
+}
+
+/** Input for bulk LPG import. */
+export interface LpgImportData {
+  nodes: LpgNode[];
+  edges: LpgEdge[];
+}
+
+/** Result of a bulk LPG import. */
+export interface LpgImportResult {
+  nodes: number;
+  edges: number;
+}
+
+/** An RDF literal object with optional datatype or language tag. */
+export interface RdfLiteral {
+  value: string;
+  datatype?: string;
+  language?: string;
+}
+
+/** An RDF triple for bulk import. Object can be an IRI string or a structured literal. */
+export interface RdfTriple {
+  subject: string;
+  predicate: string;
+  object: string | RdfLiteral;
+}
+
+/** Input for bulk RDF import. */
+export interface RdfImportData {
+  triples: RdfTriple[];
+}
+
+/** Result of a bulk RDF import. */
+export interface RdfImportResult {
+  triples: number;
+}
+
 /** Message sent from main thread to worker. */
 export interface WorkerRequest {
   id: number;

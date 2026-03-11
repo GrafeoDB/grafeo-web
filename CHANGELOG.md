@@ -6,10 +6,26 @@ All notable changes to `@grafeo-db/web`.
 
 _Align with Grafeo Core 0.5.19_
 
+### Added
+
+- **`importLpg(data)`**: bulk-import LPG nodes and edges in a single call, with index-relative edge references and automatic persistence
+- **`importRdf(data)`**: bulk-import RDF triples (requires `rdf` WASM feature), supporting IRI subjects/predicates and typed/language-tagged literals
+- **`LpgImportData`**, **`LpgImportResult`**, **`RdfImportData`**, **`RdfImportResult`** types exported from `@grafeo-db/web`
+- Worker and proxy layers updated to route `importLpg` and `importRdf`
+
 ### Changed
 
 - **`@grafeo-db/wasm`**: updated to 0.5.19
 - **`@grafeo-db/wasm-lite`**: updated to 0.5.19
+- **WASM type declarations**: updated from v0.5.10 to v0.5.19 surface (added `importLpg`, `importRdf`)
+
+### Engine highlights (via Grafeo Core 0.5.17-0.5.19)
+
+- **Named graphs**: `SHOW GRAPHS`, `USE GRAPH`, `SESSION SET GRAPH`, cross-graph transactions
+- **Graph type enforcement**: node type inheritance, edge endpoint validation, constraints
+- **LOAD DATA**: multi-format import (CSV, JSONL, Parquet) via GQL/Cypher queries
+- **RDF persistence**: SPARQL mutations now WAL-logged and snapshot-persisted
+- **Cypher/GQL compliance**: 1,300+ new spec tests, correlated EXISTS, CASE WHEN fixes
 
 
 ## [0.5.18] - 2026-03-09
