@@ -6,10 +6,16 @@ All notable changes to `@grafeo-db/web`.
 
 _Align with Grafeo Core 0.5.21_
 
+### Added
+
+- **Language-specific execute methods** in WASM type declarations: `executeCypher()`, `executeGremlin()`, `executeGraphql()`, `executeSparql()`, `executeSql()` (feature-gated convenience shortcuts)
+
 ### Changed
 
 - **`@grafeo-db/wasm`**: updated to 0.5.21
 - **`@grafeo-db/wasm-lite`**: updated to 0.5.21
+- **Node.js requirement**: bumped from >=18 to >=22 (Node 18 is EOL)
+- **CI matrix**: updated to Node 22, 24, 25
 
 
 ## [0.5.20] - 2026-03-11

@@ -1,7 +1,7 @@
 /**
  * Type declarations for @grafeo-db/wasm and @grafeo-db/wasm-lite.
  *
- * These mirror the wasm-bindgen generated types from the WASM crate (v0.5.19).
+ * These mirror the wasm-bindgen generated types from the WASM crate (v0.5.21).
  * Both variants expose the same API surface; the lite variant simply omits
  * multi-language and AI search features at the WASM level.
  *
@@ -57,6 +57,21 @@ declare module '@grafeo-db/wasm' {
       rows: unknown[][];
       executionTimeMs?: number;
     };
+
+    /** Executes a Cypher query. Requires 'cypher' WASM feature. */
+    executeCypher(query: string): Record<string, unknown>[];
+
+    /** Executes a Gremlin query. Requires 'gremlin' WASM feature. */
+    executeGremlin(query: string): Record<string, unknown>[];
+
+    /** Executes a GraphQL query. Requires 'graphql' WASM feature. */
+    executeGraphql(query: string): Record<string, unknown>[];
+
+    /** Executes a SPARQL query. Requires 'sparql' WASM feature. */
+    executeSparql(query: string): Record<string, unknown>[];
+
+    /** Executes a SQL/PGQ query. Requires 'sql-pgq' WASM feature. */
+    executeSql(query: string): Record<string, unknown>[];
 
     /** Creates a BM25 text index on a label/property. Requires 'text-index' feature. */
     createTextIndex(label: string, property: string): void;
