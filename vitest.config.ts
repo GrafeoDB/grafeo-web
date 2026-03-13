@@ -10,6 +10,7 @@ export default defineConfig({
   },
   test: {
     environment: 'happy-dom',
+    fileParallelism: false,
     include: ['src/**/*.test.ts', 'tests/**/*.test.ts'],
     setupFiles: ['./vitest.setup.ts'],
     coverage: {
