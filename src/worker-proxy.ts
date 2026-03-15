@@ -37,16 +37,20 @@ export class WorkerProxy {
 
   /** Initialize the Worker and the WASM database inside it. */
   async init(options?: CreateOptions): Promise<void> {
-    // Resolve the worker URL relative to this module.
-    // Note: import.meta.url is only available in ESM.
-    // In CJS environments, Worker usage requires a bundler that supports this.
-    const workerUrl = new URL(
-      './worker.js',
-      // eslint-disable-next-line @typescript-eslint/ban-ts-comment
-      // @ts-ignore -- import.meta.url is ESM-only; CJS build warns but worker is ESM-first
-      import.meta.url,
-    );
-    this.worker = new Worker(workerUrl, { type: 'module' });
+    if (options?.worker instanceof Worker) {
+      // Use pre-created Worker (bundler-friendly: caller handles URL resolution)
+      this.worker = options.worker;
+    } else {
+      // Auto-create Worker, resolving URL relative to this module.
+      // Note: import.meta.url is only available in ESM.
+      const workerUrl = new URL(
+        './worker.js',
+        // eslint-disable-next-line @typescript-eslint/ban-ts-comment
+        // @ts-ignore -- import.meta.url is ESM-only; CJS build warns but worker is ESM-first
+        import.meta.url,
+      );
+      this.worker = new Worker(workerUrl, { type: 'module' });
+    }
 
     this.worker.onmessage = (event: MessageEvent<WorkerResponse>) => {
       const { id, result, error } = event.data;
@@ -70,7 +74,11 @@ export class WorkerProxy {
       this.pending.clear();
     };
 
-    await this.send('init', [options]);
+    // Send only serializable options to the worker (Worker instances can't be cloned)
+    const initOptions = options
+      ? { persist: options.persist, persistInterval: options.persistInterval }
+      : undefined;
+    await this.send('init', [initOptions]);
   }
 
   /** Send a message to the Worker and wait for a response. */
@@ -87,6 +95,10 @@ export class WorkerProxy {
       const message: WorkerRequest = { id, method, args };
       this.worker.postMessage(message);
     });
+  }
+
+  async version(): Promise<string> {
+    return (await this.send('version')) as string;
   }
 
   async execute(

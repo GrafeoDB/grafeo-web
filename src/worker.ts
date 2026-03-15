@@ -61,6 +61,11 @@ async function handleMessage(request: WorkerRequest): Promise<void> {
         break;
       }
 
+      case 'version': {
+        respond(id, Database.version());
+        break;
+      }
+
       case 'execute': {
         if (!db) throw new Error('Database not initialized');
         const query = args[0] as string;

@@ -85,8 +85,16 @@ export class GrafeoDB {
     this.proxy = proxy;
   }
 
-  /** Returns the Grafeo WASM engine version. */
+  /** Returns the Grafeo WASM engine version (requires main-thread WASM init). */
   static version(): string {
+    return WasmDatabase.version();
+  }
+
+  /** Returns the engine version. Works in both direct and worker modes. */
+  async getVersion(): Promise<string> {
+    if (this.proxy) {
+      return this.proxy.version();
+    }
     return WasmDatabase.version();
   }
 
