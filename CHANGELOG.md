@@ -2,6 +2,16 @@
 
 All notable changes to `@grafeo-db/web`.
 
+## [0.5.28] - 2026-03-27
+
+_Align with Grafeo Core 0.5.28_
+
+### Changed
+
+- **`@grafeo-db/wasm`**: updated to 0.5.28
+- **`@grafeo-db/wasm-lite`**: updated to 0.5.28
+
+
 ## [0.5.27] - 2026-03-27
 
 _Align with Grafeo Core 0.5.27_
