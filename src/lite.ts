@@ -124,6 +124,30 @@ export class GrafeoDB {
     return this.wasm!.schema();
   }
 
+  /** Sets the current schema context for subsequent queries. */
+  async setSchema(name: string): Promise<void> {
+    this.assertOpen();
+    this.wasm!.setSchema(name);
+  }
+
+  /** Clears the current schema context. */
+  async resetSchema(): Promise<void> {
+    this.assertOpen();
+    this.wasm!.resetSchema();
+  }
+
+  /** Returns the current schema name, or undefined if none is set. */
+  async currentSchema(): Promise<string | undefined> {
+    this.assertOpen();
+    return this.wasm!.currentSchema();
+  }
+
+  /** Clears the query plan cache. */
+  async clearPlanCache(): Promise<void> {
+    this.assertOpen();
+    this.wasm!.clearPlanCache();
+  }
+
   /** Returns IndexedDB storage usage statistics. */
   async storageStats(): Promise<StorageStats> {
     this.assertOpen();

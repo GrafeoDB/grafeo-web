@@ -58,7 +58,7 @@ for (const row of result) {
 }
 
 // Check version
-console.log(GrafeoDB.version()); // e.g. "0.5.22"
+console.log(GrafeoDB.version()); // e.g. "0.5.27"
 
 // Cleanup
 await db.close();
@@ -109,6 +109,10 @@ Parameters work with all query languages and in the lite build.
 | `db.edgeCount()`                                          | Number of edges                                              |
 | `db.schema()`                                             | Schema info: labels, edge types, property keys               |
 | `db.memoryUsage()`                                        | Hierarchical WASM heap usage breakdown                       |
+| `db.setSchema(name)`                                      | Set current schema context                                   |
+| `db.resetSchema()`                                        | Clear current schema context                                 |
+| `db.currentSchema()`                                      | Get current schema name (or `undefined`)                     |
+| `db.clearPlanCache()`                                     | Clear cached query plans                                     |
 | `db.isOpen`                                               | Whether the database is still open                           |
 | `db.close()`                                              | Release WASM memory and cleanup                              |
 

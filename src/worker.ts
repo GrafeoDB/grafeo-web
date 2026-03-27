@@ -278,6 +278,34 @@ async function handleMessage(request: WorkerRequest): Promise<void> {
         break;
       }
 
+      case 'setSchema': {
+        if (!db) throw new Error('Database not initialized');
+        const name = args[0] as string;
+        db.setSchema(name);
+        respond(id);
+        break;
+      }
+
+      case 'resetSchema': {
+        if (!db) throw new Error('Database not initialized');
+        db.resetSchema();
+        respond(id);
+        break;
+      }
+
+      case 'currentSchema': {
+        if (!db) throw new Error('Database not initialized');
+        respond(id, db.currentSchema());
+        break;
+      }
+
+      case 'clearPlanCache': {
+        if (!db) throw new Error('Database not initialized');
+        db.clearPlanCache();
+        respond(id);
+        break;
+      }
+
       case 'memoryUsage': {
         if (!db) throw new Error('Database not initialized');
         respond(id, db.memoryUsage());

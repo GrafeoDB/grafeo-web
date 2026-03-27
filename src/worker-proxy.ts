@@ -206,6 +206,22 @@ export class WorkerProxy {
     return (await this.send('mmrSearch', [label, property, query, k, options])) as VectorResult[];
   }
 
+  async setSchema(name: string): Promise<void> {
+    await this.send('setSchema', [name]);
+  }
+
+  async resetSchema(): Promise<void> {
+    await this.send('resetSchema');
+  }
+
+  async currentSchema(): Promise<string | undefined> {
+    return (await this.send('currentSchema')) as string | undefined;
+  }
+
+  async clearPlanCache(): Promise<void> {
+    await this.send('clearPlanCache');
+  }
+
   async memoryUsage(): Promise<MemoryUsage> {
     return (await this.send('memoryUsage')) as MemoryUsage;
   }

@@ -1,7 +1,7 @@
 /**
  * Type declarations for @grafeo-db/wasm and @grafeo-db/wasm-lite.
  *
- * These mirror the wasm-bindgen generated types from the WASM crate (v0.5.21).
+ * These mirror the wasm-bindgen generated types from the WASM crate (v0.5.27).
  * Both variants expose the same API surface; the lite variant simply omits
  * multi-language and AI search features at the WASM level.
  *
@@ -147,6 +147,18 @@ declare module '@grafeo-db/wasm' {
       options?: object,
     ): { id: number; distance: number }[];
 
+    /** Sets the current schema context for subsequent queries. */
+    setSchema(name: string): void;
+
+    /** Clears the current schema context. */
+    resetSchema(): void;
+
+    /** Returns the current schema name, or undefined if none is set. */
+    currentSchema(): string | undefined;
+
+    /** Clears the query plan cache. */
+    clearPlanCache(): void;
+
     /** Returns a hierarchical memory usage breakdown. */
     memoryUsage(): object;
 
@@ -219,6 +231,10 @@ declare module '@grafeo-db/wasm-lite' {
     nodeCount(): number;
     edgeCount(): number;
     schema(): unknown;
+    setSchema(name: string): void;
+    resetSchema(): void;
+    currentSchema(): string | undefined;
+    clearPlanCache(): void;
     static version(): string;
     exportSnapshot(): Uint8Array;
     static importSnapshot(data: Uint8Array): Database;

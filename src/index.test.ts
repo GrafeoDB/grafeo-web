@@ -314,6 +314,38 @@ describe('GrafeoDB', () => {
     });
   });
 
+  describe('schema context', () => {
+    it('setSchema/currentSchema/resetSchema round-trips', async () => {
+      expect(await db.currentSchema()).toBeUndefined();
+
+      await db.setSchema('my_schema');
+      expect(await db.currentSchema()).toBe('my_schema');
+
+      await db.resetSchema();
+      expect(await db.currentSchema()).toBeUndefined();
+    });
+
+    it('throws when database is closed', async () => {
+      const instance = await GrafeoDB.create();
+      await instance.close();
+      await expect(instance.setSchema('x')).rejects.toThrow('Database is closed');
+      await expect(instance.resetSchema()).rejects.toThrow('Database is closed');
+      await expect(instance.currentSchema()).rejects.toThrow('Database is closed');
+    });
+  });
+
+  describe('clearPlanCache()', () => {
+    it('does not throw', async () => {
+      await expect(db.clearPlanCache()).resolves.toBeUndefined();
+    });
+
+    it('throws when database is closed', async () => {
+      const instance = await GrafeoDB.create();
+      await instance.close();
+      await expect(instance.clearPlanCache()).rejects.toThrow('Database is closed');
+    });
+  });
+
   describe('memoryUsage()', () => {
     it('returns a memory breakdown object', async () => {
       const usage = await db.memoryUsage();
@@ -661,6 +693,61 @@ describe('GrafeoDB (worker mode)', () => {
 
     const lastCall = mockWorker.postMessage.mock.calls.at(-1)![0];
     expect(lastCall.method).toBe('importRdf');
+
+    const closePromise = wdb.close();
+    respondToLast(undefined);
+    await closePromise;
+  });
+
+  it('delegates setSchema through proxy', async () => {
+    const wdb = await createWorkerDb();
+    const promise = wdb.setSchema('my_schema');
+    respondToLast(undefined);
+    await promise;
+
+    const lastCall = mockWorker.postMessage.mock.calls.at(-1)![0];
+    expect(lastCall.method).toBe('setSchema');
+    expect(lastCall.args).toEqual(['my_schema']);
+
+    const closePromise = wdb.close();
+    respondToLast(undefined);
+    await closePromise;
+  });
+
+  it('delegates resetSchema through proxy', async () => {
+    const wdb = await createWorkerDb();
+    const promise = wdb.resetSchema();
+    respondToLast(undefined);
+    await promise;
+
+    const lastCall = mockWorker.postMessage.mock.calls.at(-1)![0];
+    expect(lastCall.method).toBe('resetSchema');
+
+    const closePromise = wdb.close();
+    respondToLast(undefined);
+    await closePromise;
+  });
+
+  it('delegates currentSchema through proxy', async () => {
+    const wdb = await createWorkerDb();
+    const promise = wdb.currentSchema();
+    respondToLast('my_schema');
+    const result = await promise;
+    expect(result).toBe('my_schema');
+
+    const closePromise = wdb.close();
+    respondToLast(undefined);
+    await closePromise;
+  });
+
+  it('delegates clearPlanCache through proxy', async () => {
+    const wdb = await createWorkerDb();
+    const promise = wdb.clearPlanCache();
+    respondToLast(undefined);
+    await promise;
+
+    const lastCall = mockWorker.postMessage.mock.calls.at(-1)![0];
+    expect(lastCall.method).toBe('clearPlanCache');
 
     const closePromise = wdb.close();
     respondToLast(undefined);

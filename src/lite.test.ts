@@ -136,6 +136,30 @@ describe('GrafeoDB (lite)', () => {
     });
   });
 
+  describe('schema context', () => {
+    it('setSchema/currentSchema/resetSchema round-trips', async () => {
+      expect(await db.currentSchema()).toBeUndefined();
+
+      await db.setSchema('my_schema');
+      expect(await db.currentSchema()).toBe('my_schema');
+
+      await db.resetSchema();
+      expect(await db.currentSchema()).toBeUndefined();
+    });
+
+    it('throws when database is closed', async () => {
+      const instance = await GrafeoDB.create();
+      await instance.close();
+      await expect(instance.setSchema('x')).rejects.toThrow('Database is closed');
+    });
+  });
+
+  describe('clearPlanCache()', () => {
+    it('does not throw', async () => {
+      await expect(db.clearPlanCache()).resolves.toBeUndefined();
+    });
+  });
+
   describe('close()', () => {
     it('is idempotent', async () => {
       const instance = await GrafeoDB.create();

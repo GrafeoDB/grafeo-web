@@ -6,10 +6,26 @@ All notable changes to `@grafeo-db/web`.
 
 _Align with Grafeo Core 0.5.27_
 
+### Added
+
+- **Schema context methods**: `setSchema(name)`, `resetSchema()`, `currentSchema()` for multi-schema workflows. Persists across `execute()` calls
+- **`clearPlanCache()`**: clears cached query plans, useful after schema or index changes
+- Worker and proxy layers updated to route all new methods
+
 ### Changed
 
 - **`@grafeo-db/wasm`**: updated to 0.5.27
 - **`@grafeo-db/wasm-lite`**: updated to 0.5.27
+- **WASM type declarations**: updated from v0.5.21 to v0.5.27 surface (4 new methods)
+
+### Engine highlights (via Grafeo Core 0.5.25-0.5.27)
+
+- **`labels(n)`/`type(r)` in aggregation** (#187): complex expressions in GROUP BY and ORDER BY no longer fail with "Cannot resolve expression to column"
+- **ORDER BY complex expressions**: `ORDER BY labels(n)[0]` no longer leaks synthetic `__expr_` columns into results
+- **GROUP BY on list-valued keys**: `GROUP BY labels(n)` on multi-label nodes no longer produces extra rows
+- **SPARQL GROUP BY/ORDER BY with expressions**: `GROUP BY (STR(?s))` no longer fails with "Store required for expression evaluation"
+- **Vector search filter optimization**: operator filters ($gt, $lt, etc.) now scan only the narrowed allowlist instead of all nodes
+- **Adjacency inline capacity**: raised SmallVec from 4 to 8, fewer heap allocations for typical node degrees
 
 
 ## [0.5.26] - 2026-03-26

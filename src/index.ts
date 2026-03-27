@@ -451,6 +451,42 @@ export class GrafeoDB {
     return this.wasm!.mmrSearch(label, property, query, k, options) as VectorResult[];
   }
 
+  /** Sets the current schema context for subsequent queries. */
+  async setSchema(name: string): Promise<void> {
+    this.assertOpen();
+    if (this.proxy) {
+      return this.proxy.setSchema(name);
+    }
+    this.wasm!.setSchema(name);
+  }
+
+  /** Clears the current schema context. */
+  async resetSchema(): Promise<void> {
+    this.assertOpen();
+    if (this.proxy) {
+      return this.proxy.resetSchema();
+    }
+    this.wasm!.resetSchema();
+  }
+
+  /** Returns the current schema name, or undefined if none is set. */
+  async currentSchema(): Promise<string | undefined> {
+    this.assertOpen();
+    if (this.proxy) {
+      return this.proxy.currentSchema();
+    }
+    return this.wasm!.currentSchema();
+  }
+
+  /** Clears the query plan cache. */
+  async clearPlanCache(): Promise<void> {
+    this.assertOpen();
+    if (this.proxy) {
+      return this.proxy.clearPlanCache();
+    }
+    this.wasm!.clearPlanCache();
+  }
+
   /** Returns a hierarchical memory usage breakdown. */
   async memoryUsage(): Promise<MemoryUsage> {
     this.assertOpen();
