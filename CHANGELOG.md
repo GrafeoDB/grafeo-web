@@ -9,6 +9,45 @@ All notable changes to `@grafeo-db/web`.
 - **Data loss on `MATCH ... DELETE/SET/REMOVE` queries**: `isMutatingQuery` regex only checked the first token, missing 15 of 24 common mutation patterns (e.g. `MATCH (n) DELETE n`). Persistence was never triggered for these queries, causing silent data loss on page refresh. Removed the mutation check entirely: saves are now always scheduled after `execute()`, relying on the existing debounce (max 1 save/second)
 - **React `useQuery` stale options**: `options.language` and `options.params` were missing from the `useEffect` dependency array (hidden by `eslint-disable`). Changing query parameters no longer silently uses stale values
 - **Svelte `useQuery` dead code**: removed unused `version` counter that was incremented but never read
+## [0.5.26] - 2026-03-26
+
+_Align with Grafeo Core 0.5.26_
+
+### Changed
+
+- **`@grafeo-db/wasm`**: updated to 0.5.26
+- **`@grafeo-db/wasm-lite`**: updated to 0.5.26
+
+
+## [0.5.25] - 2026-03-25
+
+_Align with Grafeo Core 0.5.25_
+
+### Changed
+
+- **`@grafeo-db/wasm`**: updated to 0.5.25
+- **`@grafeo-db/wasm-lite`**: updated to 0.5.25
+
+
+## [0.5.24] - 2026-03-24
+
+_Align with Grafeo Core 0.5.24_
+
+### Changed
+
+- **`@grafeo-db/wasm`**: updated to 0.5.24
+- **`@grafeo-db/wasm-lite`**: updated to 0.5.24
+
+
+## [0.5.23] - 2026-03-23
+
+_Align with Grafeo Core 0.5.23_
+
+### Changed
+
+- **`@grafeo-db/wasm`**: updated to 0.5.23
+- **`@grafeo-db/wasm-lite`**: updated to 0.5.23
+
 
 ## [0.5.22] - 2026-03-14
 
