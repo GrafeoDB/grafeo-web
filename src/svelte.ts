@@ -156,7 +156,6 @@ export function createQuery<T = Record<string, unknown>[]>(
   let currentLoading = true;
   let currentError: Error | null = null;
   let currentDb: GrafeoDB | null = null;
-  let version = 0;
 
   function notifyData(): void {
     for (const fn of dataSubscribers) fn(currentData);
@@ -239,7 +238,6 @@ export function createQuery<T = Record<string, unknown>[]>(
   };
 
   function refetch(): void {
-    version++;
     executeQuery();
   }
 

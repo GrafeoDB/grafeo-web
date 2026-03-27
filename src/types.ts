@@ -5,8 +5,8 @@ export type QueryLanguage = 'gql' | 'cypher' | 'sparql' | 'graphql' | 'gremlin' 
 export interface CreateOptions {
   /** IndexedDB key for persistent storage. Omit for in-memory only. */
   persist?: string;
-  /** Run WASM execution in a dedicated Web Worker. */
-  worker?: boolean;
+  /** Run WASM execution in a dedicated Web Worker. Pass `true` for auto-creation, or a pre-created Worker instance for bundler-friendly usage. */
+  worker?: boolean | Worker;
   /** Debounce interval (ms) for IndexedDB writes. Default: 1000. */
   persistInterval?: number;
 }

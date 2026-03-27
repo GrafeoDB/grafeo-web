@@ -1,7 +1,6 @@
 import { Database as WasmDatabase } from '@grafeo-db/wasm';
 
 import { PersistenceManager } from './persistence';
-import { isMutatingQuery } from './query-utils';
 import { ensureWasmInitialized } from './wasm-init';
 import { WorkerProxy } from './worker-proxy';
 import type {
@@ -85,8 +84,16 @@ export class GrafeoDB {
     this.proxy = proxy;
   }
 
-  /** Returns the Grafeo WASM engine version. */
+  /** Returns the Grafeo WASM engine version (requires main-thread WASM init). */
   static version(): string {
+    return WasmDatabase.version();
+  }
+
+  /** Returns the engine version. Works in both direct and worker modes. */
+  async getVersion(): Promise<string> {
+    if (this.proxy) {
+      return this.proxy.version();
+    }
     return WasmDatabase.version();
   }
 
@@ -167,7 +174,10 @@ export class GrafeoDB {
       result = this.wasm!.execute(query) as Record<string, unknown>[];
     }
 
-    if (this.persistence && isMutatingQuery(query)) {
+    // Always save after execute: detecting mutations from query text is unreliable
+    // (e.g. "MATCH (n) DELETE n" does not start with a mutation keyword).
+    // The PersistenceManager debounce makes extra saves on reads harmless.
+    if (this.persistence) {
       this.persistence.scheduleSave(() => this.wasm!.exportSnapshot());
     }
 
@@ -193,7 +203,7 @@ export class GrafeoDB {
       ? this.wasm!.executeRawWithLanguage(query, lang)
       : this.wasm!.executeRaw(query);
 
-    if (this.persistence && isMutatingQuery(query)) {
+    if (this.persistence) {
       this.persistence.scheduleSave(() => this.wasm!.exportSnapshot());
     }
 

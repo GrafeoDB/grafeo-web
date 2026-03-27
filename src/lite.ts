@@ -1,7 +1,6 @@
 import { Database as WasmDatabase } from '@grafeo-db/wasm-lite';
 
 import { PersistenceManager } from './persistence';
-import { isMutatingQuery } from './query-utils';
 import { ensureLiteWasmInitialized } from './wasm-init-lite';
 import type {
   Change,
@@ -85,7 +84,10 @@ export class GrafeoDB {
       ? this.wasm!.executeWithParams(query, params)
       : this.wasm!.execute(query);
 
-    if (this.persistence && isMutatingQuery(query)) {
+    // Always save after execute: detecting mutations from query text is unreliable
+    // (e.g. "MATCH (n) DELETE n" does not start with a mutation keyword).
+    // The PersistenceManager debounce makes extra saves on reads harmless.
+    if (this.persistence) {
       this.persistence.scheduleSave(() => this.wasm!.exportSnapshot());
     }
 
@@ -97,7 +99,7 @@ export class GrafeoDB {
     this.assertOpen();
     const result = this.wasm!.executeRaw(query);
 
-    if (this.persistence && isMutatingQuery(query)) {
+    if (this.persistence) {
       this.persistence.scheduleSave(() => this.wasm!.exportSnapshot());
     }
 
