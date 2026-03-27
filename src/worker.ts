@@ -7,7 +7,6 @@
 import init, { Database } from '@grafeo-db/wasm';
 
 import { PersistenceManager } from './persistence';
-import { isMutatingQuery } from './query-utils';
 import type { WorkerRequest, WorkerResponse } from './types';
 
 let db: Database | null = null;
@@ -85,7 +84,10 @@ async function handleMessage(request: WorkerRequest): Promise<void> {
           result = db.execute(query) as Record<string, unknown>[];
         }
 
-        if (persistence && isMutatingQuery(query)) {
+        // Always save after execute: detecting mutations from query text is
+        // unreliable (e.g. "MATCH (n) DELETE n" misses the mutation keyword).
+        // The PersistenceManager debounce makes extra saves on reads harmless.
+        if (persistence) {
           persistence.scheduleSave(() => db!.exportSnapshot());
         }
 
@@ -102,7 +104,7 @@ async function handleMessage(request: WorkerRequest): Promise<void> {
           ? db.executeRawWithLanguage(query, lang)
           : db.executeRaw(query);
 
-        if (persistence && isMutatingQuery(query)) {
+        if (persistence) {
           persistence.scheduleSave(() => db!.exportSnapshot());
         }
 

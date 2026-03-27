@@ -89,6 +89,11 @@ export function useQuery<T = Record<string, unknown>[]>(
   const [version, setVersion] = useState(0);
   const mountedRef = useRef(true);
 
+  const language = options?.language;
+  const paramsJson = JSON.stringify(options?.params ?? null);
+  const optionsRef = useRef(options);
+  optionsRef.current = options;
+
   const refetch = useCallback(() => {
     setVersion((v: number) => v + 1);
   }, []);
@@ -104,7 +109,7 @@ export function useQuery<T = Record<string, unknown>[]>(
     setLoading(true);
     setError(null);
 
-    db.execute(query, options)
+    db.execute(query, optionsRef.current)
       .then((result) => {
         if (mountedRef.current) {
           setData(result as T);
@@ -121,8 +126,7 @@ export function useQuery<T = Record<string, unknown>[]>(
     return () => {
       mountedRef.current = false;
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [db, query, version]);
+  }, [db, query, version, language, paramsJson]);
 
   return { data, loading, error, refetch };
 }

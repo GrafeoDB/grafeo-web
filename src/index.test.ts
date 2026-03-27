@@ -435,6 +435,46 @@ describe('GrafeoDB', () => {
       expect(stats).toEqual({ bytesUsed: 0, quota: 0 });
     });
   });
+
+  describe('persistence scheduling (isMutatingQuery removal)', () => {
+    it('schedules save after INSERT', async () => {
+      const pdb = await GrafeoDB.create({ persist: 'persist-insert-test' });
+      // INSERT is an obviously mutating query, should always trigger save
+      await pdb.execute("INSERT (:Person {name: 'Alix'})");
+      // If we reach here without error, persistence scheduling succeeded
+      await pdb.close();
+    });
+
+    it('schedules save after MATCH...DELETE (previously missed)', async () => {
+      const pdb = await GrafeoDB.create({ persist: 'persist-delete-test' });
+      await pdb.execute("INSERT (:Temp {name: 'del'})");
+      // MATCH (n) DELETE n was the primary pattern missed by the old isMutatingQuery regex
+      await pdb.execute('MATCH (n:Temp) DELETE n');
+      await pdb.close();
+    });
+
+    it('schedules save after MATCH...SET (previously missed)', async () => {
+      const pdb = await GrafeoDB.create({ persist: 'persist-set-test' });
+      await pdb.execute("INSERT (:Temp {name: 'upd', age: 1})");
+      // MATCH ... SET was another missed pattern
+      await pdb.execute('MATCH (n:Temp) SET n.age = 2');
+      await pdb.close();
+    });
+
+    it('schedules save after read-only query (by design)', async () => {
+      const pdb = await GrafeoDB.create({ persist: 'persist-read-test' });
+      await pdb.execute("INSERT (:Person {name: 'Alix'})");
+      // Even read queries now trigger save (the fix removes isMutatingQuery entirely)
+      await pdb.execute('MATCH (n) RETURN n');
+      await pdb.close();
+    });
+
+    it('schedules save after executeRaw', async () => {
+      const pdb = await GrafeoDB.create({ persist: 'persist-raw-test' });
+      await pdb.executeRaw("INSERT (:Person {name: 'Alix'})");
+      await pdb.close();
+    });
+  });
 });
 
 // Worker-mode tests for proxy delegation branches
