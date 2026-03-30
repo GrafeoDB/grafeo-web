@@ -2,6 +2,34 @@
 
 All notable changes to `@grafeo-db/web`.
 
+## [0.5.30] - 2026-03-30
+
+_Align with Grafeo Core 0.5.28-0.5.30_
+
+### Changed
+
+- **`@grafeo-db/wasm`**: updated to 0.5.30
+- **`@grafeo-db/wasm-lite`**: updated to 0.5.30
+- **WASM type declarations**: version comment updated to v0.5.30 (no API surface changes)
+
+### Engine highlights (via Grafeo Core 0.5.28-0.5.30)
+
+- **`.grafeo` single-file format fix** (0.5.28): the `grafeo-file` feature was missing from the embedded profile, causing silent fallback to WAL directory format. Now works correctly for snapshot import/export
+- **Integer arithmetic safety** (0.5.29): overflow (e.g. `9223372036854775807 + 1`) returns NULL instead of panicking. Checked arithmetic for all operations
+- **Label intersection** (0.5.29): `MATCH (n:A) MATCH (n:B)` now correctly filters to nodes with both labels
+- **EXISTS with property filters** (0.5.29): `EXISTS { (n)-[:R]->(m) WHERE m.age > 30 }` now includes the WHERE clause
+- **EXISTS subquery in RETURN** (0.5.29): `RETURN EXISTS { MATCH (n)-[:R]->(:Label) } AS flag`
+- **Keywords as property names** (0.5.29): `{order: 3}` and `n.order` now parse correctly
+- **CASE WHEN with NULL aggregates** (0.5.29): correct handling when aggregate returns NULL
+- **Aggregate detection in GQL WITH** (0.5.29): `WITH count(n) AS cnt, max(n.val) AS mx` produces correct aggregate operators
+- **Gremlin fixes** (0.5.29): `hasLabel()` on edges, `coalesce()` first-non-empty semantics, `group().by()` two-pass fix, `optional()` per-row semantics, `values()` null filtering, `or()` three-valued logic
+- **SPARQL functions in SELECT** (0.5.29): STRLEN, UCASE, LCASE, IF, COALESCE, REPLACE and more now work in projections. IN/NOT IN operators added. BOUND() distinguishes unbound from null
+- **SQL/PGQ fixes** (0.5.29-0.5.30): unbounded variable-length paths, COUNT(column) NULL skipping, CASE in WHERE, zero-length paths, ORDER BY aggregate aliases, parameters in WHERE, HAVING inline aggregates
+- **Cypher `collect(DISTINCT ...)`** (0.5.30): `size(collect(DISTINCT n.v))` correctly extracts wrapped aggregate
+- **Memory optimization** (0.5.29): adjacency list struct reduced from 256 to ~144 bytes with auto-compaction
+- **JSON Infinity/NaN** (0.5.29): `SUM()` overflow encoded as string `"Infinity"` instead of `null`
+
+
 ## [0.5.27] - 2026-03-27
 
 _Align with Grafeo Core 0.5.27_
