@@ -6,10 +6,28 @@ All notable changes to `@grafeo-db/web`.
 
 _Align with Grafeo Core 0.5.31_
 
+### Added
+
+- **`info()`**: returns high-level database information (mode, counts, persistence status, version, compiled feature flags). Available in full, lite, and worker builds
+- **`DatabaseInfo` type**: typed interface for the `info()` return value
+
 ### Changed
 
 - **`@grafeo-db/wasm`**: updated to 0.5.31
 - **`@grafeo-db/wasm-lite`**: updated to 0.5.31
+- **WASM type declarations**: version comment updated to v0.5.31, added `info()` method
+
+### Engine highlights (via Grafeo Core 0.5.31)
+
+- **CompactStore**: read-optimized columnar graph store for memory-constrained environments (WASM, edge workers, embedded). Per-label columnar storage with typed columns, double-indexed CSR adjacency, zone-map skip optimization. Opt-in via `compact-store` feature flag
+- **SQL/PGQ UNION, INTERSECT, EXCEPT**: full set operation support between GRAPH_TABLE queries
+- **GraphQL multiple root fields and variable substitution**: all root fields now translated via Union; `$variable` references emit parameters with default value propagation
+- **GQL list slice and path search fixes**: `[1..3]`, `[..2]`, `[3..]` slices, `MATCH ANY p = ...` and `MATCH p = ANY SHORTEST ...` path search
+- **SPARQL fixes**: MINUS, property paths, VALUES with UNDEF, `GRAPH ?g` scoping, `DESCRIBE`, string/type functions in projections, DELETE with FILTER
+- **Gremlin traversal fixes**: multi-hop dead ends, `values()` all-properties, scalar union coercion, `path()` on empty traversal
+- **Cypher `CREATE INDEX` / `DROP INDEX` / `SHOW INDEXES`**: indexes now registered in catalog
+- **GraphQL aggregation**: `personCount`, `personAggregate`, and `_count` field patterns
+- **RDF schema type propagation**: concrete types threaded through plan tree, ~5x memory reduction for triple scan columns
 
 
 ## [0.5.30] - 2026-03-30

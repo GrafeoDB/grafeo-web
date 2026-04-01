@@ -5,13 +5,14 @@ import { ensureLiteWasmInitialized } from './wasm-init-lite';
 import type {
   Change,
   CreateOptions,
+  DatabaseInfo,
   DatabaseSnapshot,
   LiteExecuteOptions,
   RawQueryResult,
   StorageStats,
 } from './types';
 
-export type { Change, CreateOptions, DatabaseSnapshot, LiteExecuteOptions, RawQueryResult, StorageStats };
+export type { Change, CreateOptions, DatabaseInfo, DatabaseSnapshot, LiteExecuteOptions, RawQueryResult, StorageStats };
 
 /**
  * A lightweight Grafeo database supporting GQL only.
@@ -146,6 +147,12 @@ export class GrafeoDB {
   async clearPlanCache(): Promise<void> {
     this.assertOpen();
     this.wasm!.clearPlanCache();
+  }
+
+  /** Returns high-level database information (counts, mode, compiled features). */
+  async info(): Promise<DatabaseInfo> {
+    this.assertOpen();
+    return this.wasm!.info() as DatabaseInfo;
   }
 
   /** Returns IndexedDB storage usage statistics. */

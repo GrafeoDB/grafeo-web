@@ -355,6 +355,29 @@ describe('GrafeoDB', () => {
     });
   });
 
+  describe('info()', () => {
+    it('returns database information with mode, version, and features', async () => {
+      const dbInfo = await db.info();
+      expect(dbInfo.mode).toBe('Lpg');
+      expect(typeof dbInfo.version).toBe('string');
+      expect(Array.isArray(dbInfo.features)).toBe(true);
+      expect(dbInfo.features).toContain('gql');
+    });
+
+    it('reflects current node and edge counts', async () => {
+      await db.execute("INSERT (:Person {name: 'Alice'})");
+      const dbInfo = await db.info();
+      expect(dbInfo.node_count).toBe(1);
+      expect(dbInfo.edge_count).toBe(0);
+    });
+
+    it('throws when database is closed', async () => {
+      const instance = await GrafeoDB.create();
+      await instance.close();
+      await expect(instance.info()).rejects.toThrow('Database is closed');
+    });
+  });
+
   describe('importRows()', () => {
     it('imports nodes from row objects', async () => {
       const count = await db.importRows(
@@ -632,6 +655,22 @@ describe('GrafeoDB (worker mode)', () => {
     respondToLast(mockUsage);
     const result = await promise;
     expect(result).toEqual(mockUsage);
+
+    const closePromise = wdb.close();
+    respondToLast(undefined);
+    await closePromise;
+  });
+
+  it('delegates info through proxy', async () => {
+    const wdb = await createWorkerDb();
+    const mockInfo = { mode: 'Lpg', node_count: 5, edge_count: 3, version: '0.5.31', features: ['gql'] };
+    const promise = wdb.info();
+    respondToLast(mockInfo);
+    const result = await promise;
+    expect(result).toEqual(mockInfo);
+
+    const lastCall = mockWorker.postMessage.mock.calls.at(-1)![0];
+    expect(lastCall.method).toBe('info');
 
     const closePromise = wdb.close();
     respondToLast(undefined);

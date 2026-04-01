@@ -6,6 +6,7 @@ import { WorkerProxy } from './worker-proxy';
 import type {
   Change,
   CreateOptions,
+  DatabaseInfo,
   DatabaseSnapshot,
   ExecuteOptions,
   ImportRowsOptions,
@@ -31,6 +32,7 @@ import type {
 export type {
   Change,
   CreateOptions,
+  DatabaseInfo,
   DatabaseSnapshot,
   ExecuteOptions,
   ImportRowsOptions,
@@ -494,6 +496,15 @@ export class GrafeoDB {
       return this.proxy.memoryUsage();
     }
     return this.wasm!.memoryUsage() as MemoryUsage;
+  }
+
+  /** Returns high-level database information (counts, mode, compiled features). */
+  async info(): Promise<DatabaseInfo> {
+    this.assertOpen();
+    if (this.proxy) {
+      return this.proxy.info();
+    }
+    return this.wasm!.info() as DatabaseInfo;
   }
 
   /**

@@ -1,5 +1,6 @@
 import type {
   CreateOptions,
+  DatabaseInfo,
   DatabaseSnapshot,
   ExecuteOptions,
   ImportRowsOptions,
@@ -224,6 +225,10 @@ export class WorkerProxy {
 
   async memoryUsage(): Promise<MemoryUsage> {
     return (await this.send('memoryUsage')) as MemoryUsage;
+  }
+
+  async info(): Promise<DatabaseInfo> {
+    return (await this.send('info')) as DatabaseInfo;
   }
 
   async importRows(rows: Record<string, unknown>[], options: ImportRowsOptions): Promise<number> {

@@ -1,7 +1,7 @@
 /**
  * Type declarations for @grafeo-db/wasm and @grafeo-db/wasm-lite.
  *
- * These mirror the wasm-bindgen generated types from the WASM crate (v0.5.30).
+ * These mirror the wasm-bindgen generated types from the WASM crate (v0.5.31).
  * Both variants expose the same API surface; the lite variant simply omits
  * multi-language and AI search features at the WASM level.
  *
@@ -162,6 +162,9 @@ declare module '@grafeo-db/wasm' {
     /** Returns a hierarchical memory usage breakdown. */
     memoryUsage(): object;
 
+    /** Returns high-level database information (counts, mode, features). */
+    info(): object;
+
     /**
      * Bulk-imports rows (array of objects) as nodes or edges.
      * The WASM equivalent of Python's import_df().
@@ -235,6 +238,8 @@ declare module '@grafeo-db/wasm-lite' {
     resetSchema(): void;
     currentSchema(): string | undefined;
     clearPlanCache(): void;
+    /** Returns high-level database information (counts, mode, features). */
+    info(): object;
     static version(): string;
     exportSnapshot(): Uint8Array;
     static importSnapshot(data: Uint8Array): Database;
