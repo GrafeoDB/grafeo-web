@@ -160,6 +160,22 @@ describe('GrafeoDB (lite)', () => {
     });
   });
 
+  describe('info()', () => {
+    it('returns database information with mode and features', async () => {
+      const dbInfo = await db.info();
+      expect(dbInfo.mode).toBe('Lpg');
+      expect(typeof dbInfo.version).toBe('string');
+      expect(Array.isArray(dbInfo.features)).toBe(true);
+      expect(dbInfo.features).toContain('gql');
+    });
+
+    it('throws when database is closed', async () => {
+      const instance = await GrafeoDB.create();
+      await instance.close();
+      await expect(instance.info()).rejects.toThrow('Database is closed');
+    });
+  });
+
   describe('close()', () => {
     it('is idempotent', async () => {
       const instance = await GrafeoDB.create();

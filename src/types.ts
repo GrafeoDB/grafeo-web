@@ -165,6 +165,26 @@ export interface ImportRowsOptions {
   target?: string;
 }
 
+/** High-level database information returned by info(). */
+export interface DatabaseInfo {
+  /** Database mode ("Lpg" or "Rdf"). */
+  mode: string;
+  /** Number of nodes. */
+  node_count: number;
+  /** Number of edges. */
+  edge_count: number;
+  /** Whether the database is backed by a file. */
+  is_persistent: boolean;
+  /** Database file path, if persistent. */
+  path: string | null;
+  /** Whether WAL is enabled. */
+  wal_enabled: boolean;
+  /** Engine version string. */
+  version: string;
+  /** Compiled feature flags (e.g. "gql", "cypher", "algos", "vector-index"). */
+  features: string[];
+}
+
 /** Hierarchical memory usage breakdown. */
 export interface MemoryUsage {
   total_bytes: number;

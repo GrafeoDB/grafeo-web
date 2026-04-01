@@ -312,6 +312,12 @@ async function handleMessage(request: WorkerRequest): Promise<void> {
         break;
       }
 
+      case 'info': {
+        if (!db) throw new Error('Database not initialized');
+        respond(id, db.info());
+        break;
+      }
+
       case 'importRows': {
         if (!db) throw new Error('Database not initialized');
         const [rows, options] = args as [object[], object];
