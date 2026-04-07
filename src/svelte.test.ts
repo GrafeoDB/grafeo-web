@@ -150,6 +150,59 @@ describe('createGrafeo (Svelte)', () => {
   });
 });
 
+describe('T8: subscriber cleanup and db lifecycle (Svelte)', () => {
+  it('unsubscribing all db subscribers closes the database', async () => {
+    const { db, loading } = createGrafeo();
+
+    const l = get(loading);
+    await vi.waitFor(() => {
+      expect(l.value()).toBe(false);
+    });
+    l.unsubscribe();
+
+    // Subscribe to db
+    const d = get(db);
+    const instance = d.value();
+    expect(instance).not.toBe(null);
+
+    // Unsubscribe last db subscriber, which triggers auto-close
+    d.unsubscribe();
+
+    // After auto-close, re-subscribing should yield null (db was closed)
+    const d2 = get(db);
+    expect(d2.value()).toBe(null);
+    d2.unsubscribe();
+  });
+
+  it('creating a new createGrafeo after closing the first works independently', async () => {
+    // First instance
+    const result1 = createGrafeo();
+    const l1 = get(result1.loading);
+    await vi.waitFor(() => {
+      expect(l1.value()).toBe(false);
+    });
+    l1.unsubscribe();
+
+    // Close the first
+    await result1.close();
+
+    // Second instance is independent
+    const result2 = createGrafeo();
+    const l2 = get(result2.loading);
+    await vi.waitFor(() => {
+      expect(l2.value()).toBe(false);
+    });
+
+    const d2 = get(result2.db);
+    expect(d2.value()).not.toBe(null);
+    expect(d2.value()).toHaveProperty('execute');
+
+    d2.unsubscribe();
+    l2.unsubscribe();
+    await result2.close();
+  });
+});
+
 describe('createQuery (Svelte)', () => {
   it('executes query when db store emits a database', async () => {
     const { db, loading: dbLoading, close } = createGrafeo();

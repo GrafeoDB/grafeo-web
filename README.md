@@ -58,7 +58,7 @@ for (const row of result) {
 }
 
 // Check version
-console.log(GrafeoDB.version()); // e.g. "0.5.27"
+console.log(GrafeoDB.version()); // e.g. "0.5.31"
 
 // Cleanup
 await db.close();
@@ -157,9 +157,9 @@ Parameters work with all query languages and in the lite build.
 
 ```typescript
 {
-  persist?: string;          // IndexedDB key for persistence
-  worker?: boolean;          // Run WASM in a Web Worker
-  persistInterval?: number;  // Debounce interval in ms (default: 1000)
+  persist?: string;            // IndexedDB key for persistence
+  worker?: boolean | Worker;   // Run WASM in a Web Worker (or pass a pre-created Worker)
+  persistInterval?: number;    // Debounce interval in ms (default: 1000)
 }
 ```
 
@@ -187,7 +187,7 @@ const result = await db.execute(`MATCH (u:User) RETURN u.name`);
 // -> [{ 'u.name': 'Alice' }]
 ```
 
-Persistence only triggers on mutating queries (INSERT, CREATE, DELETE, etc.), not on reads.
+Persistence triggers after every query execution (the debounce interval prevents excessive writes).
 
 ### Storage Management
 
@@ -360,11 +360,76 @@ Requires WebAssembly, IndexedDB and Web Workers.
 
 For larger datasets, use [Grafeo](https://github.com/GrafeoDB/grafeo) server-side.
 
+## Worker Mode vs Direct Mode
+
+GrafeoDB supports two execution modes:
+
+**Direct mode** (default): WASM runs on the main thread.
+
+- Best for small databases (< 10 MB) and simple queries.
+- Lowest latency: no message serialization overhead.
+- Simpler setup: no bundler configuration for workers.
+- Caveat: long-running queries block the UI thread.
+
+```typescript
+const db = await GrafeoDB.create();
+```
+
+**Worker mode**: WASM runs in a dedicated Web Worker.
+
+- Best for large databases, complex traversals, or bulk imports.
+- Keeps the UI responsive: all WASM execution happens off the main thread.
+- Slightly higher latency per call due to message passing.
+- Requires bundler support for `new Worker(...)` (Vite, Webpack 5, esbuild all support this).
+
+```typescript
+const db = await GrafeoDB.create({ worker: true });
+```
+
+If your bundler does not support auto-resolving the worker URL, pass a pre-created `Worker` instance:
+
+```typescript
+const worker = new Worker(new URL('@grafeo-db/web/worker-src', import.meta.url), { type: 'module' });
+const db = await GrafeoDB.create({ worker });
+```
+
+**Rule of thumb**: start with direct mode. Switch to worker mode when queries take longer than 50 ms or when you notice UI jank.
+
+## Troubleshooting
+
+### Slow queries
+
+- **Check node/edge count**: call `db.nodeCount()` and `db.edgeCount()`. Databases above ~100 K nodes may benefit from worker mode.
+- **Avoid unbounded traversals**: queries like `MATCH (a)-[*]->(b)` with no depth limit scan the entire graph. Add a depth bound: `MATCH (a)-[*1..5]->(b)`.
+- **Use indexes**: for vector or text search, create an index first (`db.createVectorIndex(...)` or `db.createTextIndex(...)`). Without an index, search scans all nodes.
+- **Clear the plan cache**: if you have changed the shape of your data significantly, call `db.clearPlanCache()` to discard stale query plans.
+
+### IndexedDB quota exceeded
+
+IndexedDB quota varies by browser (typically ~500 MB, less in incognito/private mode).
+
+- **Check usage**: call `db.storageStats()` to see current bytes used vs. quota.
+- **Export and trim**: export with `db.export()`, delete unneeded nodes, then re-import.
+- **Reduce persistence frequency**: set `persistInterval` to a higher value (e.g. `5000` ms) to reduce write pressure.
+
+```typescript
+const db = await GrafeoDB.create({ persist: 'mydb', persistInterval: 5000 });
+```
+
+### Worker setup in bundlers
+
+If you see errors like "Failed to construct Worker" or "Module not found":
+
+- **Vite**: Worker URLs via `import.meta.url` work out of the box.
+- **Webpack 5**: Ensure `new Worker(new URL(...))` syntax is used. Webpack detects this pattern and bundles the worker entry.
+- **Next.js**: Use the pre-created Worker approach shown above. Dynamic `import.meta.url` does not work in Next.js server components.
+- **Create React App**: CRA (Webpack 4) does not support the `new URL(...)` pattern. Use `worker: new Worker(...)` with a manually configured worker URL.
+
 ## Development
 
 ```bash
 npm run build      # Build all entries via tsup
-npm test           # Run tests (vitest, 145 tests)
+npm test           # Run tests (vitest, 201 tests)
 npm run typecheck  # Type check (tsc --noEmit)
 ```
 

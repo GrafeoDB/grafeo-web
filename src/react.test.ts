@@ -106,6 +106,82 @@ describe('useGrafeo (React)', () => {
   });
 });
 
+describe('T6: useGrafeo mount/unmount/remount (React)', () => {
+  it('remount creates a fresh db, not stale state', async () => {
+    // First mount
+    const { result: result1, unmount: unmount1 } = renderHook(() => useGrafeo());
+
+    await vi.waitFor(() => {
+      expect(result1.current.loading).toBe(false);
+    });
+
+    const firstDb = result1.current.db!;
+    expect(firstDb).toHaveProperty('execute');
+    expect(firstDb.isOpen).toBe(true);
+
+    // Insert data in first instance
+    await firstDb.execute("INSERT (:Person {name: 'Alice'})");
+
+    // Unmount (triggers close)
+    unmount1();
+
+    // Second mount (remount)
+    const { result: result2, unmount: unmount2 } = renderHook(() => useGrafeo());
+
+    await vi.waitFor(() => {
+      expect(result2.current.loading).toBe(false);
+    });
+
+    const secondDb = result2.current.db!;
+    expect(secondDb).toHaveProperty('execute');
+    expect(secondDb.isOpen).toBe(true);
+
+    // The new db should be a fresh instance (no stale state from the first)
+    expect(secondDb).not.toBe(firstDb);
+
+    // Fresh database should have no data
+    const results = await secondDb.execute('MATCH (p:Person) RETURN p.name');
+    expect(results).toEqual([]);
+
+    unmount2();
+  });
+
+  it('unmount closes db, no lingering references', async () => {
+    const { result, unmount } = renderHook(() => useGrafeo());
+
+    await vi.waitFor(() => {
+      expect(result.current.loading).toBe(false);
+    });
+
+    const instance = result.current.db!;
+    expect(instance.isOpen).toBe(true);
+
+    unmount();
+
+    // After unmount, the instance should be closed
+    expect(instance.isOpen).toBe(false);
+  });
+
+  it('rapid mount/unmount/remount does not throw', async () => {
+    // Mount
+    const { unmount: u1 } = renderHook(() => useGrafeo());
+    // Immediately unmount before init finishes
+    u1();
+
+    // Remount
+    const { result: r2, unmount: u2 } = renderHook(() => useGrafeo());
+
+    await vi.waitFor(() => {
+      expect(r2.current.loading).toBe(false);
+    });
+
+    expect(r2.current.db).not.toBe(null);
+    expect(r2.current.error).toBe(null);
+
+    u2();
+  });
+});
+
 describe('useQuery (React)', () => {
   let db: GrafeoDBInstance;
 
