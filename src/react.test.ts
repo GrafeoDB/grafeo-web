@@ -164,7 +164,7 @@ describe('T6: useGrafeo mount/unmount/remount (React)', () => {
 
   it('rapid mount/unmount/remount does not throw', async () => {
     // Mount
-    const { result: r1, unmount: u1 } = renderHook(() => useGrafeo());
+    const { unmount: u1 } = renderHook(() => useGrafeo());
     // Immediately unmount before init finishes
     u1();
 
