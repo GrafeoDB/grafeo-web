@@ -79,7 +79,7 @@
         "default": "./dist/svelte.cjs"
       }
     },
-    "./worker-src": "./src/worker.ts"
+    "./worker-src": "./dist/worker.js"
   },
   "main": "./dist/index.cjs",
   "module": "./dist/index.js",

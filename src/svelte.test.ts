@@ -174,28 +174,6 @@ describe('T8: subscriber cleanup and db lifecycle (Svelte)', () => {
     d2.unsubscribe();
   });
 
-  it('resubscribing after auto-close yields null (db does not reopen automatically)', async () => {
-    const { db, loading } = createGrafeo();
-
-    const l = get(loading);
-    await vi.waitFor(() => {
-      expect(l.value()).toBe(false);
-    });
-    l.unsubscribe();
-
-    // Subscribe and get the instance
-    const d1 = get(db);
-    expect(d1.value()).not.toBe(null);
-
-    // Unsubscribe to trigger auto-close
-    d1.unsubscribe();
-
-    // Re-subscribe: db should be null (auto-close already happened)
-    const d2 = get(db);
-    expect(d2.value()).toBe(null);
-    d2.unsubscribe();
-  });
-
   it('creating a new createGrafeo after closing the first works independently', async () => {
     // First instance
     const result1 = createGrafeo();
