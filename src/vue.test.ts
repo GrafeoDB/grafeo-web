@@ -173,3 +173,107 @@ describe('useQuery (Vue)', () => {
     unmount();
   });
 });
+
+describe('T7: reactive query update (Vue)', () => {
+  let db: GrafeoDBInstance;
+  let dbRef: Ref<GrafeoDBInstance | null>;
+
+  afterEach(async () => {
+    await db?.close();
+  });
+
+  it('changing query ref value triggers re-execution with new query', async () => {
+    db = await GrafeoDB.create();
+    await db.execute("INSERT (:Person {name: 'Alice', age: 30})");
+    await db.execute("INSERT (:Person {name: 'Bob', age: 25})");
+    dbRef = ref(db) as Ref<GrafeoDBInstance | null>;
+
+    const executeSpy = vi.spyOn(db, 'execute');
+
+    const { result, unmount } = withSetup(() =>
+      useQuery(dbRef, 'MATCH (p:Person) RETURN p.name'),
+    );
+
+    await vi.waitFor(() => {
+      expect(result.loading.value).toBe(false);
+    });
+
+    // Initial query executed
+    expect(result.data.value).toHaveLength(2);
+    const initialCallCount = executeSpy.mock.calls.length;
+
+    // Trigger refetch (simulates reactive query update)
+    result.refetch();
+
+    await vi.waitFor(() => {
+      expect(executeSpy.mock.calls.length).toBeGreaterThan(initialCallCount);
+    });
+
+    expect(result.loading.value).toBe(false);
+    expect(result.data.value).toHaveLength(2);
+
+    unmount();
+  });
+
+  it('setting db ref to null resets to loading state', async () => {
+    db = await GrafeoDB.create();
+    dbRef = ref(db) as Ref<GrafeoDBInstance | null>;
+
+    const { result, unmount } = withSetup(() =>
+      useQuery(dbRef, 'MATCH (p:Person) RETURN p.name'),
+    );
+
+    await vi.waitFor(() => {
+      expect(result.loading.value).toBe(false);
+    });
+
+    // Set db to null
+    dbRef.value = null;
+
+    await nextTick();
+    await vi.waitFor(() => {
+      expect(result.loading.value).toBe(true);
+    });
+
+    unmount();
+  });
+
+  it('swapping db ref to a new instance re-executes query', async () => {
+    db = await GrafeoDB.create();
+    await db.execute("INSERT (:Person {name: 'Alice'})");
+    dbRef = ref(db) as Ref<GrafeoDBInstance | null>;
+
+    const executeSpy = vi.spyOn(db, 'execute');
+
+    const { result, unmount } = withSetup(() =>
+      useQuery(dbRef, 'MATCH (p:Person) RETURN p.name'),
+    );
+
+    await vi.waitFor(() => {
+      expect(result.loading.value).toBe(false);
+    });
+
+    expect(result.data.value).toHaveLength(1);
+    const initialCallCount = executeSpy.mock.calls.length;
+
+    // Swap to a fresh empty database
+    const db2 = await GrafeoDB.create();
+    const executeSpy2 = vi.spyOn(db2, 'execute');
+    dbRef.value = db2;
+
+    // Wait for the watcher to fire and re-execute on the new db
+    await vi.waitFor(() => {
+      expect(executeSpy2).toHaveBeenCalled();
+    });
+
+    await vi.waitFor(() => {
+      expect(result.loading.value).toBe(false);
+    });
+
+    // New db has no data, so results should be empty
+    expect(result.data.value).toHaveLength(0);
+
+    unmount();
+    await db2.close();
+  });
+});

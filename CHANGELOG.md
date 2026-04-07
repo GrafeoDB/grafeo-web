@@ -2,6 +2,35 @@
 
 All notable changes to `@grafeo-db/web`.
 
+## [Unreleased]
+
+Test coverage, dependency updates and documentation fixes.
+
+### Added
+
+- **Error handling tests**: concurrent `createGrafeo()` race (10 parallel calls), use-after-close for 8 methods, feature detection for 6 missing WASM features
+- **API parity tests**: worker proxy vs main API method coverage, schema reflection after mutations, lite build export verification
+- **React lifecycle test**: mount/unmount/remount with no stale state
+- **Vue reactive test**: query ref change triggers result update, null db reset, db swap re-execution
+- **Svelte lifecycle test**: unsubscribe closes db, resubscribe behavior, independent instances
+
+### Fixed
+
+- README: persistence description corrected (fires after every query, not only mutations)
+- README: `CreateOptions.worker` type corrected to `boolean | Worker`
+- README: version example updated from 0.5.27 to 0.5.31
+- `.claude/CLAUDE.md`: stale persistence lesson corrected
+
+### Changed
+
+- TypeScript bumped from ^5.3.0 to ^5.8.0
+- vitest bumped from ^4.0.18 to ^4.1.2
+- happy-dom bumped from ^20.6.1 to ^20.8.9
+- `@grafeo-db/wasm` and `@grafeo-db/wasm-lite` bumped from ^0.5.31 to ^0.5.33
+- README: added Worker vs Direct mode guide with bundler examples (Vite, Webpack, Next.js)
+- README: added Troubleshooting section (slow queries, IndexedDB quota, worker setup)
+- 201 tests passing
+
 ## [0.5.31] - 2026-04-01
 
 _Align with Grafeo Core 0.5.31_
