@@ -2,7 +2,9 @@
 
 All notable changes to `@grafeo-db/web`.
 
-## [Unreleased]
+## [0.5.34] - 2026-04-07
+
+_Align with Grafeo Core 0.5.34_
 
 Test coverage, dependency updates and documentation fixes.
 
@@ -30,6 +32,32 @@ Test coverage, dependency updates and documentation fixes.
 - README: added Worker vs Direct mode guide with bundler examples (Vite, Webpack, Next.js)
 - README: added Troubleshooting section (slow queries, IndexedDB quota, worker setup)
 - 201 tests passing
+
+### Changed
+
+- **`@grafeo-db/wasm`**: updated to 0.5.34
+- **`@grafeo-db/wasm-lite`**: updated to 0.5.34
+
+
+## [0.5.33] - 2026-04-05
+
+_Align with Grafeo Core 0.5.33_
+
+### Changed
+
+- **`@grafeo-db/wasm`**: updated to 0.5.33
+- **`@grafeo-db/wasm-lite`**: updated to 0.5.33
+
+
+## [0.5.32] - 2026-04-03
+
+_Align with Grafeo Core 0.5.32_
+
+### Changed
+
+- **`@grafeo-db/wasm`**: updated to 0.5.32
+- **`@grafeo-db/wasm-lite`**: updated to 0.5.32
+
 
 ## [0.5.31] - 2026-04-01
 
