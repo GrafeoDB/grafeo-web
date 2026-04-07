@@ -152,7 +152,7 @@ describe('createGrafeo (Svelte)', () => {
 
 describe('T8: subscriber cleanup and db lifecycle (Svelte)', () => {
   it('unsubscribing all db subscribers closes the database', async () => {
-    const { db, loading, close } = createGrafeo();
+    const { db, loading } = createGrafeo();
 
     const l = get(loading);
     await vi.waitFor(() => {
