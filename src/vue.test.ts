@@ -254,7 +254,6 @@ describe('T7: reactive query update (Vue)', () => {
     });
 
     expect(result.data.value).toHaveLength(1);
-    const initialCallCount = executeSpy.mock.calls.length;
 
     // Swap to a fresh empty database
     const db2 = await GrafeoDB.create();
