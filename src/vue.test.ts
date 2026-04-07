@@ -243,8 +243,6 @@ describe('T7: reactive query update (Vue)', () => {
     await db.execute("INSERT (:Person {name: 'Alice'})");
     dbRef = ref(db) as Ref<GrafeoDBInstance | null>;
 
-    const executeSpy = vi.spyOn(db, 'execute');
-
     const { result, unmount } = withSetup(() =>
       useQuery(dbRef, 'MATCH (p:Person) RETURN p.name'),
     );
