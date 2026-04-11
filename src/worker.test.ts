@@ -221,6 +221,56 @@ describe('Worker message handler', () => {
     });
   });
 
+  describe('compact', () => {
+    it('compact succeeds', async () => {
+      const res = await send('compact', [], 2);
+      expect(res.error).toBeUndefined();
+    });
+
+    it('compact with persistence triggers save', async () => {
+      await send('init', [{ persist: 'worker-compact-test' }], 80);
+      const res = await send('compact', [], 81);
+      expect(res.error).toBeUndefined();
+      await send('close', [], 82);
+    });
+  });
+
+  describe('snapshot migration', () => {
+    it('recovers from incompatible snapshot on init', async () => {
+      // First persist a snapshot
+      await send('init', [{ persist: 'worker-migration-test' }], 90);
+      await send('execute', ["INSERT (:Person {name: 'Alice'})"], 91);
+      await send('close', [], 92);
+
+      // Make importSnapshot throw
+      const { Database } = await import('./__mocks__/wasm');
+      const originalImport = Database.importSnapshot;
+      Database.importSnapshot = () => {
+        throw new Error('Incompatible snapshot format');
+      };
+
+      const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+      // Should recover gracefully
+      const res = await send('init', [{ persist: 'worker-migration-test' }], 93);
+      expect(res.result).toBe(true);
+      expect(res.error).toBeUndefined();
+
+      // Fresh db should have 0 nodes
+      const countRes = await send('nodeCount', [], 94);
+      expect(countRes.result).toBe(0);
+
+      expect(warnSpy).toHaveBeenCalledWith(
+        expect.stringContaining('incompatible with this WASM version'),
+        expect.any(Error),
+      );
+
+      Database.importSnapshot = originalImport;
+      warnSpy.mockRestore();
+      await send('close', [], 95);
+    });
+  });
+
   describe('close', () => {
     it('closes the database', async () => {
       const res = await send('close', [], 2);

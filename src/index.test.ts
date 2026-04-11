@@ -37,6 +37,40 @@ describe('GrafeoDB', () => {
     });
   });
 
+  describe('snapshot migration', () => {
+    it('recovers from incompatible persisted snapshot', async () => {
+      // First, persist a snapshot
+      const pdb = await GrafeoDB.create({ persist: 'migration-test' });
+      await pdb.execute("INSERT (:Person {name: 'Alice'})");
+      await pdb.close();
+
+      // Make importSnapshot throw to simulate format incompatibility
+      const { Database } = await import('./__mocks__/wasm');
+      const originalImport = Database.importSnapshot;
+      Database.importSnapshot = () => {
+        throw new Error('Incompatible snapshot format');
+      };
+
+      const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+      // Should recover gracefully instead of crashing
+      const recovered = await GrafeoDB.create({ persist: 'migration-test' });
+      expect(recovered).toBeDefined();
+      expect(recovered.isOpen).toBe(true);
+      // Fresh db should have 0 nodes
+      expect(await recovered.nodeCount()).toBe(0);
+
+      expect(warnSpy).toHaveBeenCalledWith(
+        expect.stringContaining('incompatible with this WASM version'),
+        expect.any(Error),
+      );
+
+      Database.importSnapshot = originalImport;
+      warnSpy.mockRestore();
+      await recovered.close();
+    });
+  });
+
   describe('execute()', () => {
     it('inserts and queries nodes', async () => {
       await db.execute("INSERT (:Person {name: 'Alice', age: 30})");
@@ -331,6 +365,36 @@ describe('GrafeoDB', () => {
       await expect(instance.setSchema('x')).rejects.toThrow('Database is closed');
       await expect(instance.resetSchema()).rejects.toThrow('Database is closed');
       await expect(instance.currentSchema()).rejects.toThrow('Database is closed');
+    });
+  });
+
+  describe('compact()', () => {
+    it('does not throw', async () => {
+      await expect(db.compact()).resolves.toBeUndefined();
+    });
+
+    it('triggers persistence when persisted', async () => {
+      const pdb = await GrafeoDB.create({ persist: 'compact-test' });
+      await expect(pdb.compact()).resolves.toBeUndefined();
+      await pdb.close();
+    });
+
+    it('throws when database is closed', async () => {
+      const instance = await GrafeoDB.create();
+      await instance.close();
+      await expect(instance.compact()).rejects.toThrow('Database is closed');
+    });
+
+    it('throws when feature missing', async () => {
+      const instance = await GrafeoDB.create();
+      const wasm = (instance as unknown as { wasm: Record<string, unknown> }).wasm;
+      Object.defineProperty(wasm, 'compact', { value: undefined, configurable: true });
+
+      await expect(instance.compact()).rejects.toThrow(
+        "compact() requires @grafeo-db/wasm built with the 'compact-store' feature",
+      );
+
+      await instance.close();
     });
   });
 
@@ -787,6 +851,20 @@ describe('GrafeoDB (worker mode)', () => {
 
     const lastCall = mockWorker.postMessage.mock.calls.at(-1)![0];
     expect(lastCall.method).toBe('clearPlanCache');
+
+    const closePromise = wdb.close();
+    respondToLast(undefined);
+    await closePromise;
+  });
+
+  it('delegates compact through proxy', async () => {
+    const wdb = await createWorkerDb();
+    const promise = wdb.compact();
+    respondToLast(undefined);
+    await promise;
+
+    const lastCall = mockWorker.postMessage.mock.calls.at(-1)![0];
+    expect(lastCall.method).toBe('compact');
 
     const closePromise = wdb.close();
     respondToLast(undefined);

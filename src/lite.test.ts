@@ -25,6 +25,39 @@ describe('GrafeoDB (lite)', () => {
     });
   });
 
+  describe('snapshot migration', () => {
+    it('recovers from incompatible persisted snapshot', async () => {
+      // First, persist a snapshot
+      const pdb = await GrafeoDB.create({ persist: 'lite-migration-test' });
+      await pdb.execute("INSERT (:Person {name: 'Alice'})");
+      await pdb.close();
+
+      // Make importSnapshot throw to simulate format incompatibility
+      const { Database } = await import('./__mocks__/wasm');
+      const originalImport = Database.importSnapshot;
+      Database.importSnapshot = () => {
+        throw new Error('Incompatible snapshot format');
+      };
+
+      const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+      // Should recover gracefully instead of crashing
+      const recovered = await GrafeoDB.create({ persist: 'lite-migration-test' });
+      expect(recovered).toBeDefined();
+      expect(recovered.isOpen).toBe(true);
+      expect(await recovered.nodeCount()).toBe(0);
+
+      expect(warnSpy).toHaveBeenCalledWith(
+        expect.stringContaining('incompatible with this WASM version'),
+        expect.any(Error),
+      );
+
+      Database.importSnapshot = originalImport;
+      warnSpy.mockRestore();
+      await recovered.close();
+    });
+  });
+
   describe('isOpen', () => {
     it('returns true while open', () => {
       expect(db.isOpen).toBe(true);

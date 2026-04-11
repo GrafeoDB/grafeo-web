@@ -52,9 +52,10 @@ async function handleMessage(request: WorkerRequest): Promise<void> {
           if (snapshot) {
             try {
               db = Database.importSnapshot(snapshot);
-            } catch {
+            } catch (err) {
               console.warn(
                 `[grafeo-web] Persisted snapshot for "${options.persist}" is incompatible with this WASM version (likely a storage-format change). Starting with a fresh database.`,
+                err,
               );
               db = new Database();
               await persistence.clear();
