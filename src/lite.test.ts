@@ -206,6 +206,21 @@ describe('GrafeoDB (lite)', () => {
       expect(names).toEqual([]);
     });
 
+    it('triggers persistence on createProjection', async () => {
+      const pdb = await GrafeoDB.create({ persist: 'lite-proj-create' });
+      const created = await pdb.createProjection('social', ['Person']);
+      expect(created).toBe(true);
+      await pdb.close();
+    });
+
+    it('triggers persistence on dropProjection', async () => {
+      const pdb = await GrafeoDB.create({ persist: 'lite-proj-drop' });
+      await pdb.createProjection('social', ['Person']);
+      const dropped = await pdb.dropProjection('social');
+      expect(dropped).toBe(true);
+      await pdb.close();
+    });
+
     it('throws when database is closed', async () => {
       const instance = await GrafeoDB.create();
       await instance.close();
