@@ -306,6 +306,8 @@ export class Database {
 
   exportSnapshot(): Uint8Array {
     this.assertNotFreed();
+    // Projections are intentionally excluded: they are transient in-memory
+    // views in the real engine, rebuilt from the graph store on demand.
     const data = JSON.stringify({ nodes: this.nodes, edges: this.edges });
     return new TextEncoder().encode(data);
   }
@@ -323,6 +325,7 @@ export class Database {
     this.freed = true;
     this.nodes = [];
     this.edges = [];
+    this.projections.clear();
   }
 
   private assertNotFreed(): void {
