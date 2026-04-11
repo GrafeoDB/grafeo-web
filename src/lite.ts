@@ -59,9 +59,20 @@ export class GrafeoDB {
         options.persistInterval,
       );
       const snapshot = await persistence.load();
-      wasm = snapshot
-        ? WasmDatabase.importSnapshot(snapshot)
-        : new WasmDatabase();
+      if (snapshot) {
+        try {
+          wasm = WasmDatabase.importSnapshot(snapshot);
+        } catch (err) {
+          console.warn(
+            `[grafeo-web] Persisted snapshot for "${options.persist}" is incompatible with this WASM version (likely a storage-format change). Starting with a fresh database. Export your data before upgrading to avoid data loss.`,
+            err,
+          );
+          wasm = new WasmDatabase();
+          await persistence.clear();
+        }
+      } else {
+        wasm = new WasmDatabase();
+      }
     } else {
       wasm = new WasmDatabase();
     }

@@ -49,9 +49,20 @@ async function handleMessage(request: WorkerRequest): Promise<void> {
             options.persistInterval,
           );
           const snapshot = await persistence.load();
-          db = snapshot
-            ? Database.importSnapshot(snapshot)
-            : new Database();
+          if (snapshot) {
+            try {
+              db = Database.importSnapshot(snapshot);
+            } catch (err) {
+              console.warn(
+                `[grafeo-web] Persisted snapshot for "${options.persist}" is incompatible with this WASM version (likely a storage-format change). Starting with a fresh database.`,
+                err,
+              );
+              db = new Database();
+              await persistence.clear();
+            }
+          } else {
+            db = new Database();
+          }
         } else {
           db = new Database();
         }
@@ -296,6 +307,17 @@ async function handleMessage(request: WorkerRequest): Promise<void> {
       case 'currentSchema': {
         if (!db) throw new Error('Database not initialized');
         respond(id, db.currentSchema());
+        break;
+      }
+
+      case 'compact': {
+        if (!db) throw new Error('Database not initialized');
+        assertWorkerFeature(db, 'compact', 'compact-store');
+        (db as unknown as { compact(): void }).compact();
+        if (persistence) {
+          persistence.scheduleSave(() => db!.exportSnapshot());
+        }
+        respond(id);
         break;
       }
 

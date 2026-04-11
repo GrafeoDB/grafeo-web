@@ -6,10 +6,36 @@ All notable changes to `@grafeo-db/web`.
 
 _Align with Grafeo Core 0.5.35_
 
+### Breaking
+
+- **Storage format changed**: Grafeo Core 0.5.35 switched from bincode blobs to a block-based section format. Databases persisted to IndexedDB with 0.5.34 or earlier are **incompatible**. Export your data (`db.export()`) before upgrading, then re-import (`db.import(snapshot)`) after. If an incompatible snapshot is detected, `create()` now logs a warning and starts a fresh database instead of crashing.
+- **Feature profile rename**: the `rdf` WASM feature flag has been renamed to `triple-store`. The old `rdf` alias still works in this release but is deprecated and will be removed in 0.7.0. Persona-based profiles (`lpg`, `rdf`, `analytics`, `ai`, `edge`, `enterprise`) replace the old deployment-target profiles (`embedded`, `browser`, `server`, `full`).
+
+### Added
+
+- **`compact()`**: converts the database to CompactStore format for read-optimized, memory-constrained use. Requires `compact-store` WASM feature. Available in direct, worker, and proxy modes.
+- **Snapshot migration guard**: `GrafeoDB.create({ persist: '...' })` now catches incompatible snapshots from older WASM versions, clears the stale IndexedDB entry, and starts fresh with a console warning.
+
 ### Changed
 
 - **`@grafeo-db/wasm`**: updated to 0.5.35
 - **`@grafeo-db/wasm-lite`**: updated to 0.5.35
+- **WASM type declarations**: version comment updated to v0.5.35, added `compact()` method
+
+### Engine highlights (via Grafeo Core 0.5.35)
+
+- **Block-based container format**: `.grafeo` files use section directories with checksummed, independently addressable sections. Checkpoint writes only dirty sections, recovery loads in parallel
+- **`grafeo-storage` crate**: persistence I/O extracted from `grafeo-adapters` into its own crate
+- **Arrow IPC export** (`arrow-export`): zero-copy export to Arrow IPC for DuckDB, Polars, pandas interop
+- **GEXF + GraphML export**: graph interchange for Gephi, Cytoscape, NetworkX
+- **Incremental backup**: `backup_full()`, `backup_incremental()`, `restore_to_epoch()` in the core engine
+- **CDC retention and eviction**: epoch-based and count-based retention limits for the change data capture log
+- **WAL overlay**: in-memory mutation layer for mmap'd base data
+- **Vector spill to disk**: vector columns drain to mmap storage under memory pressure
+- **Per-section memory config**: `SectionMemoryConfig` with `max_ram` caps per section type
+- **`QueryResult.rows` is now private** in the Rust API (use `rows()`/`into_rows()`), no impact on WASM/JS surface
+- **`#[non_exhaustive]` on 95 public enums** in the Rust API, no impact on WASM/JS surface
+- **WAL replay fix**: data written via mutations was previously lost across restarts when no explicit checkpoint was called
 
 
 ## [0.5.34] - 2026-04-07

@@ -219,6 +219,10 @@ export class WorkerProxy {
     return (await this.send('currentSchema')) as string | undefined;
   }
 
+  async compact(): Promise<void> {
+    await this.send('compact');
+  }
+
   async clearPlanCache(): Promise<void> {
     await this.send('clearPlanCache');
   }
