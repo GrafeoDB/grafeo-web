@@ -1,7 +1,7 @@
 /**
  * Type declarations for @grafeo-db/wasm and @grafeo-db/wasm-lite.
  *
- * These mirror the wasm-bindgen generated types from the WASM crate (v0.5.35).
+ * These mirror the wasm-bindgen generated types from the WASM crate (v0.5.36).
  * Both variants expose the same API surface; the lite variant simply omits
  * multi-language and AI search features at the WASM level.
  *
@@ -156,6 +156,22 @@ declare module '@grafeo-db/wasm' {
     /** Returns the current schema name, or undefined if none is set. */
     currentSchema(): string | undefined;
 
+    /**
+     * Creates a named graph projection. Returns true if created, false if
+     * a projection with that name already exists.
+     */
+    createProjection(
+      name: string,
+      nodeLabels?: string[],
+      edgeTypes?: string[],
+    ): boolean;
+
+    /** Drops a named graph projection. Returns true if it existed. */
+    dropProjection(name: string): boolean;
+
+    /** Returns the names of all graph projections. */
+    listProjections(): string[];
+
     /** Clears the query plan cache. */
     clearPlanCache(): void;
 
@@ -240,6 +256,13 @@ declare module '@grafeo-db/wasm-lite' {
     setSchema(name: string): void;
     resetSchema(): void;
     currentSchema(): string | undefined;
+    createProjection(
+      name: string,
+      nodeLabels?: string[],
+      edgeTypes?: string[],
+    ): boolean;
+    dropProjection(name: string): boolean;
+    listProjections(): string[];
     clearPlanCache(): void;
     /** Returns high-level database information (counts, mode, features). */
     info(): object;

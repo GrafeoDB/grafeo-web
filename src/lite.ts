@@ -136,6 +136,47 @@ export class GrafeoDB {
     return this.wasm!.schema();
   }
 
+  /**
+   * Creates a named graph projection (a read-only filtered view of the graph).
+   *
+   * @param name - Unique projection name.
+   * @param nodeLabels - Optional label filter. Omit to include all nodes.
+   * @param edgeTypes - Optional edge-type filter. Omit to include all edges.
+   * @returns `true` if created, `false` if a projection with that name already exists.
+   */
+  async createProjection(
+    name: string,
+    nodeLabels?: string[],
+    edgeTypes?: string[],
+  ): Promise<boolean> {
+    this.assertOpen();
+    const created = this.wasm!.createProjection(name, nodeLabels, edgeTypes);
+    if (this.persistence) {
+      this.persistence.scheduleSave(() => this.wasm!.exportSnapshot());
+    }
+    return created;
+  }
+
+  /**
+   * Drops a named graph projection.
+   *
+   * @returns `true` if the projection existed and was removed.
+   */
+  async dropProjection(name: string): Promise<boolean> {
+    this.assertOpen();
+    const existed = this.wasm!.dropProjection(name);
+    if (this.persistence) {
+      this.persistence.scheduleSave(() => this.wasm!.exportSnapshot());
+    }
+    return existed;
+  }
+
+  /** Returns the names of all active graph projections. */
+  async listProjections(): Promise<string[]> {
+    this.assertOpen();
+    return this.wasm!.listProjections();
+  }
+
   /** Sets the current schema context for subsequent queries. */
   async setSchema(name: string): Promise<void> {
     this.assertOpen();

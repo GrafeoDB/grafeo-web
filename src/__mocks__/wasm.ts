@@ -2,7 +2,7 @@
  * Mock for @grafeo-db/wasm used in tests.
  *
  * Simulates a basic in-memory graph database with INSERT/MATCH support.
- * Matches the WASM 0.5.35 API surface.
+ * Matches the WASM 0.5.36 API surface.
  */
 
 interface Node {
@@ -22,6 +22,7 @@ export class Database {
   private edges: Edge[] = [];
   private freed = false;
   private schemaName: string | undefined = undefined;
+  private projections = new Map<string, { nodeLabels?: string[]; edgeTypes?: string[] }>();
 
   constructor() {
     // no-op
@@ -256,6 +257,27 @@ export class Database {
     return this.schemaName;
   }
 
+  createProjection(
+    name: string,
+    nodeLabels?: string[],
+    edgeTypes?: string[],
+  ): boolean {
+    this.assertNotFreed();
+    if (this.projections.has(name)) return false;
+    this.projections.set(name, { nodeLabels, edgeTypes });
+    return true;
+  }
+
+  dropProjection(name: string): boolean {
+    this.assertNotFreed();
+    return this.projections.delete(name);
+  }
+
+  listProjections(): string[] {
+    this.assertNotFreed();
+    return [...this.projections.keys()];
+  }
+
   clearPlanCache(): void {
     this.assertNotFreed();
   }
@@ -273,17 +295,19 @@ export class Database {
       is_persistent: false,
       path: null,
       wal_enabled: false,
-      version: '0.5.35-mock',
+      version: '0.5.36-mock',
       features: ['gql'],
     };
   }
 
   static version(): string {
-    return '0.5.35-mock';
+    return '0.5.36-mock';
   }
 
   exportSnapshot(): Uint8Array {
     this.assertNotFreed();
+    // Projections are intentionally excluded: they are transient in-memory
+    // views in the real engine, rebuilt from the graph store on demand.
     const data = JSON.stringify({ nodes: this.nodes, edges: this.edges });
     return new TextEncoder().encode(data);
   }
@@ -301,6 +325,7 @@ export class Database {
     this.freed = true;
     this.nodes = [];
     this.edges = [];
+    this.projections.clear();
   }
 
   private assertNotFreed(): void {

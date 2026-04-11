@@ -271,6 +271,58 @@ describe('Worker message handler', () => {
     });
   });
 
+  describe('graph projections', () => {
+    it('createProjection returns true', async () => {
+      const res = await send('createProjection', ['social', ['Person'], ['KNOWS']], 2);
+      expect(res.error).toBeUndefined();
+      expect(res.result).toBe(true);
+    });
+
+    it('createProjection returns false for duplicate', async () => {
+      await send('createProjection', ['social', ['Person'], ['KNOWS']], 2);
+      const res = await send('createProjection', ['social', ['Person'], ['KNOWS']], 3);
+      expect(res.result).toBe(false);
+    });
+
+    it('dropProjection returns true when existed', async () => {
+      await send('createProjection', ['social', ['Person']], 2);
+      const res = await send('dropProjection', ['social'], 3);
+      expect(res.error).toBeUndefined();
+      expect(res.result).toBe(true);
+    });
+
+    it('dropProjection returns false when not found', async () => {
+      const res = await send('dropProjection', ['nonexistent'], 2);
+      expect(res.result).toBe(false);
+    });
+
+    it('listProjections returns names', async () => {
+      await send('createProjection', ['social', ['Person'], ['KNOWS']], 2);
+      await send('createProjection', ['docs', ['Document']], 3);
+      const res = await send('listProjections', [], 4);
+      expect(res.error).toBeUndefined();
+      expect(res.result).toContain('social');
+      expect(res.result).toContain('docs');
+    });
+
+    it('createProjection triggers persistence', async () => {
+      await send('init', [{ persist: 'worker-proj-create' }], 40);
+      const res = await send('createProjection', ['social', ['Person']], 41);
+      expect(res.error).toBeUndefined();
+      expect(res.result).toBe(true);
+      await send('close', [], 42);
+    });
+
+    it('dropProjection triggers persistence', async () => {
+      await send('init', [{ persist: 'worker-proj-drop' }], 43);
+      await send('createProjection', ['social', ['Person']], 44);
+      const res = await send('dropProjection', ['social'], 45);
+      expect(res.error).toBeUndefined();
+      expect(res.result).toBe(true);
+      await send('close', [], 46);
+    });
+  });
+
   describe('close', () => {
     it('closes the database', async () => {
       const res = await send('close', [], 2);
