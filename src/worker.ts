@@ -289,6 +289,34 @@ async function handleMessage(request: WorkerRequest): Promise<void> {
         break;
       }
 
+      case 'createProjection': {
+        if (!db) throw new Error('Database not initialized');
+        const [name, nodeLabels, edgeTypes] = args as [string, string[] | undefined, string[] | undefined];
+        const created = db.createProjection(name, nodeLabels, edgeTypes);
+        if (persistence) {
+          persistence.scheduleSave(() => db!.exportSnapshot());
+        }
+        respond(id, created);
+        break;
+      }
+
+      case 'dropProjection': {
+        if (!db) throw new Error('Database not initialized');
+        const projName = args[0] as string;
+        const existed = db.dropProjection(projName);
+        if (persistence) {
+          persistence.scheduleSave(() => db!.exportSnapshot());
+        }
+        respond(id, existed);
+        break;
+      }
+
+      case 'listProjections': {
+        if (!db) throw new Error('Database not initialized');
+        respond(id, db.listProjections());
+        break;
+      }
+
       case 'setSchema': {
         if (!db) throw new Error('Database not initialized');
         const name = args[0] as string;

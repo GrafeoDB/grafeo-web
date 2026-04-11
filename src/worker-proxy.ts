@@ -207,6 +207,18 @@ export class WorkerProxy {
     return (await this.send('mmrSearch', [label, property, query, k, options])) as VectorResult[];
   }
 
+  async createProjection(name: string, nodeLabels?: string[], edgeTypes?: string[]): Promise<boolean> {
+    return (await this.send('createProjection', [name, nodeLabels, edgeTypes])) as boolean;
+  }
+
+  async dropProjection(name: string): Promise<boolean> {
+    return (await this.send('dropProjection', [name])) as boolean;
+  }
+
+  async listProjections(): Promise<string[]> {
+    return (await this.send('listProjections')) as string[];
+  }
+
   async setSchema(name: string): Promise<void> {
     await this.send('setSchema', [name]);
   }

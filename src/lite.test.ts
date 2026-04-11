@@ -169,6 +169,52 @@ describe('GrafeoDB (lite)', () => {
     });
   });
 
+  describe('graph projections', () => {
+    it('createProjection returns true on first call', async () => {
+      const created = await db.createProjection('social', ['Person'], ['KNOWS']);
+      expect(created).toBe(true);
+    });
+
+    it('createProjection returns false for duplicate name', async () => {
+      await db.createProjection('social', ['Person'], ['KNOWS']);
+      const duplicate = await db.createProjection('social', ['Person'], ['KNOWS']);
+      expect(duplicate).toBe(false);
+    });
+
+    it('dropProjection returns true when it existed', async () => {
+      await db.createProjection('social', ['Person']);
+      const dropped = await db.dropProjection('social');
+      expect(dropped).toBe(true);
+    });
+
+    it('dropProjection returns false when not found', async () => {
+      const dropped = await db.dropProjection('nonexistent');
+      expect(dropped).toBe(false);
+    });
+
+    it('listProjections returns created names', async () => {
+      await db.createProjection('social', ['Person'], ['KNOWS']);
+      await db.createProjection('docs', ['Document']);
+      const names = await db.listProjections();
+      expect(names).toContain('social');
+      expect(names).toContain('docs');
+      expect(names).toHaveLength(2);
+    });
+
+    it('listProjections returns empty array initially', async () => {
+      const names = await db.listProjections();
+      expect(names).toEqual([]);
+    });
+
+    it('throws when database is closed', async () => {
+      const instance = await GrafeoDB.create();
+      await instance.close();
+      await expect(instance.createProjection('x')).rejects.toThrow('Database is closed');
+      await expect(instance.dropProjection('x')).rejects.toThrow('Database is closed');
+      await expect(instance.listProjections()).rejects.toThrow('Database is closed');
+    });
+  });
+
   describe('schema context', () => {
     it('setSchema/currentSchema/resetSchema round-trips', async () => {
       expect(await db.currentSchema()).toBeUndefined();

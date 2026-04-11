@@ -348,6 +348,72 @@ describe('GrafeoDB', () => {
     });
   });
 
+  describe('graph projections', () => {
+    it('createProjection returns true on first call', async () => {
+      const created = await db.createProjection('social', ['Person'], ['KNOWS']);
+      expect(created).toBe(true);
+    });
+
+    it('createProjection returns false for duplicate name', async () => {
+      await db.createProjection('social', ['Person'], ['KNOWS']);
+      const duplicate = await db.createProjection('social', ['Person'], ['KNOWS']);
+      expect(duplicate).toBe(false);
+    });
+
+    it('createProjection works without filters', async () => {
+      const created = await db.createProjection('all');
+      expect(created).toBe(true);
+    });
+
+    it('dropProjection returns true when it existed', async () => {
+      await db.createProjection('social', ['Person']);
+      const dropped = await db.dropProjection('social');
+      expect(dropped).toBe(true);
+    });
+
+    it('dropProjection returns false when not found', async () => {
+      const dropped = await db.dropProjection('nonexistent');
+      expect(dropped).toBe(false);
+    });
+
+    it('listProjections returns created projection names', async () => {
+      await db.createProjection('social', ['Person'], ['KNOWS']);
+      await db.createProjection('docs', ['Document']);
+      const names = await db.listProjections();
+      expect(names).toContain('social');
+      expect(names).toContain('docs');
+      expect(names).toHaveLength(2);
+    });
+
+    it('listProjections returns empty array initially', async () => {
+      const names = await db.listProjections();
+      expect(names).toEqual([]);
+    });
+
+    it('triggers persistence on createProjection', async () => {
+      const pdb = await GrafeoDB.create({ persist: 'proj-create-test' });
+      const created = await pdb.createProjection('social', ['Person']);
+      expect(created).toBe(true);
+      await pdb.close();
+    });
+
+    it('triggers persistence on dropProjection', async () => {
+      const pdb = await GrafeoDB.create({ persist: 'proj-drop-test' });
+      await pdb.createProjection('social', ['Person']);
+      const dropped = await pdb.dropProjection('social');
+      expect(dropped).toBe(true);
+      await pdb.close();
+    });
+
+    it('throws when database is closed', async () => {
+      const instance = await GrafeoDB.create();
+      await instance.close();
+      await expect(instance.createProjection('x')).rejects.toThrow('Database is closed');
+      await expect(instance.dropProjection('x')).rejects.toThrow('Database is closed');
+      await expect(instance.listProjections()).rejects.toThrow('Database is closed');
+    });
+  });
+
   describe('schema context', () => {
     it('setSchema/currentSchema/resetSchema round-trips', async () => {
       expect(await db.currentSchema()).toBeUndefined();
@@ -865,6 +931,52 @@ describe('GrafeoDB (worker mode)', () => {
 
     const lastCall = mockWorker.postMessage.mock.calls.at(-1)![0];
     expect(lastCall.method).toBe('compact');
+
+    const closePromise = wdb.close();
+    respondToLast(undefined);
+    await closePromise;
+  });
+
+  it('delegates createProjection through proxy', async () => {
+    const wdb = await createWorkerDb();
+    const promise = wdb.createProjection('social', ['Person'], ['KNOWS']);
+    respondToLast(true);
+    const result = await promise;
+    expect(result).toBe(true);
+
+    const lastCall = mockWorker.postMessage.mock.calls.at(-1)![0];
+    expect(lastCall.method).toBe('createProjection');
+    expect(lastCall.args).toEqual(['social', ['Person'], ['KNOWS']]);
+
+    const closePromise = wdb.close();
+    respondToLast(undefined);
+    await closePromise;
+  });
+
+  it('delegates dropProjection through proxy', async () => {
+    const wdb = await createWorkerDb();
+    const promise = wdb.dropProjection('social');
+    respondToLast(true);
+    const result = await promise;
+    expect(result).toBe(true);
+
+    const lastCall = mockWorker.postMessage.mock.calls.at(-1)![0];
+    expect(lastCall.method).toBe('dropProjection');
+
+    const closePromise = wdb.close();
+    respondToLast(undefined);
+    await closePromise;
+  });
+
+  it('delegates listProjections through proxy', async () => {
+    const wdb = await createWorkerDb();
+    const promise = wdb.listProjections();
+    respondToLast(['social', 'docs']);
+    const result = await promise;
+    expect(result).toEqual(['social', 'docs']);
+
+    const lastCall = mockWorker.postMessage.mock.calls.at(-1)![0];
+    expect(lastCall.method).toBe('listProjections');
 
     const closePromise = wdb.close();
     respondToLast(undefined);
