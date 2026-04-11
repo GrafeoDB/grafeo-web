@@ -6,10 +6,30 @@ All notable changes to `@grafeo-db/web`.
 
 _Align with Grafeo Core 0.5.36_
 
+### Added
+
+- **Graph projection methods**: read-only filtered views of the graph, powered by the new Grafeo Core projection engine
+  - `createProjection(name, nodeLabels?, edgeTypes?)`: create a named projection scoped by label and edge-type filters. Returns `true` if created, `false` if a projection with that name already exists
+  - `dropProjection(name)`: remove a projection. Returns `true` if it existed
+  - `listProjections()`: list the names of all active projections
+- Worker and proxy layers updated to route all projection methods
+- 21 new tests covering projections (direct, worker proxy, lite, persistence, closed-db guards)
+
 ### Changed
 
 - **`@grafeo-db/wasm`**: updated to 0.5.36
 - **`@grafeo-db/wasm-lite`**: updated to 0.5.36
+- **WASM type declarations**: version comment updated to v0.5.36, added 3 projection methods to both full and lite module declarations
+
+### Engine highlights (via Grafeo Core 0.5.36)
+
+- **Role-based access control**: `Identity`, `Role` (`Admin`/`ReadWrite`/`ReadOnly`), and per-graph `Grant` types for session-level permission scoping. Not yet exposed in WASM bindings
+- **Graph projections**: `ProjectionSpec` filters by node labels and edge types, available across Rust, Python, Node.js, WASM, and C
+- **Gremlin `repeat().times()`/`.emit()`**: fixed-depth and all-depths traversal via `VariableLengthExpand`
+- **CSV/JSON Lines import**: CLI and binding-level bulk import (not applicable to WASM)
+- **Unified aggregate accumulator**: push-based operator now supports all 30+ aggregate functions
+- **`session_read_only()` deprecated**: use `session_with_role(Role::ReadOnly)` instead
+- **Bug fixes**: parameterized query permission bypass, projection neighbor/edge-type leakage, spill serialization DISTINCT semantics, Gremlin negative `times()`, stale projections after `compact()`
 
 
 ## [0.5.35] - 2026-04-11
