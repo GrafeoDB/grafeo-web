@@ -1,7 +1,7 @@
 /**
  * Type declarations for @grafeo-db/wasm and @grafeo-db/wasm-lite.
  *
- * These mirror the wasm-bindgen generated types from the WASM crate (v0.5.31).
+ * These mirror the wasm-bindgen generated types from the WASM crate (v0.5.35).
  * Both variants expose the same API surface; the lite variant simply omits
  * multi-language and AI search features at the WASM level.
  *
@@ -158,6 +158,9 @@ declare module '@grafeo-db/wasm' {
 
     /** Clears the query plan cache. */
     clearPlanCache(): void;
+
+    /** Converts the database to CompactStore format. Requires 'compact-store' WASM feature. */
+    compact(): void;
 
     /** Returns a hierarchical memory usage breakdown. */
     memoryUsage(): object;
