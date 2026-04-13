@@ -1,4 +1,4 @@
-import { onUnmounted, ref, watch, type Ref } from 'vue';
+import { isRef, onUnmounted, ref, unref, watch, type Ref } from 'vue';
 
 import { GrafeoDB } from './index';
 import type { CreateOptions, ExecuteOptions } from './types';
@@ -35,18 +35,26 @@ export function useGrafeo(options?: CreateOptions): UseGrafeoResult {
   const db = ref<GrafeoDB | null>(null);
   const loading = ref(true);
   const error = ref<Error | null>(null);
+  let unmounted = false;
 
   GrafeoDB.create(options)
     .then((created) => {
-      db.value = created;
-      loading.value = false;
+      if (unmounted) {
+        created.close();
+      } else {
+        db.value = created;
+        loading.value = false;
+      }
     })
     .catch((err: unknown) => {
-      error.value = err instanceof Error ? err : new Error(String(err));
-      loading.value = false;
+      if (!unmounted) {
+        error.value = err instanceof Error ? err : new Error(String(err));
+        loading.value = false;
+      }
     });
 
   onUnmounted(() => {
+    unmounted = true;
     db.value?.close();
   });
 
@@ -57,6 +65,7 @@ export function useGrafeo(options?: CreateOptions): UseGrafeoResult {
  * Vue composable for running a reactive query against a GrafeoDB instance.
  *
  * Re-executes the query whenever the database ref or query changes.
+ * The `query` parameter can be a plain string or a `Ref<string>` for reactive updates.
  *
  * @example
  * ```vue
@@ -68,7 +77,7 @@ export function useGrafeo(options?: CreateOptions): UseGrafeoResult {
  */
 export function useQuery<T = Record<string, unknown>[]>(
   db: Ref<GrafeoDB | null>,
-  query: string,
+  query: string | Ref<string>,
   options?: ExecuteOptions,
 ): UseQueryResult<T> {
   const data = ref<T | null>(null) as Ref<T | null>;
@@ -80,10 +89,13 @@ export function useQuery<T = Record<string, unknown>[]>(
     version.value++;
   };
 
+  const querySource = isRef(query) ? query : () => query;
+
   watch(
-    [db, () => query, version],
+    [db, querySource, version],
     async () => {
       const database = db.value;
+      const queryStr = unref(query);
       if (!database) {
         loading.value = true;
         return;
@@ -93,7 +105,7 @@ export function useQuery<T = Record<string, unknown>[]>(
       error.value = null;
 
       try {
-        const result = await database.execute(query, options);
+        const result = await database.execute(queryStr, options);
         data.value = result as T;
       } catch (err: unknown) {
         error.value = err instanceof Error ? err : new Error(String(err));

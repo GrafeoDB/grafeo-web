@@ -4,15 +4,17 @@ import { PersistenceManager } from './persistence';
 import { ensureLiteWasmInitialized } from './wasm-init-lite';
 import type {
   Change,
-  CreateOptions,
   DatabaseInfo,
   DatabaseSnapshot,
+  LiteCreateOptions,
   LiteExecuteOptions,
   RawQueryResult,
+  SchemaInfo,
+  SchemaLabel,
   StorageStats,
 } from './types';
 
-export type { Change, CreateOptions, DatabaseInfo, DatabaseSnapshot, LiteExecuteOptions, RawQueryResult, StorageStats };
+export type { Change, DatabaseInfo, DatabaseSnapshot, LiteCreateOptions, LiteExecuteOptions, RawQueryResult, SchemaInfo, SchemaLabel, StorageStats };
 
 /**
  * A lightweight Grafeo database supporting GQL only.
@@ -44,10 +46,10 @@ export class GrafeoDB {
   /**
    * Creates a new GrafeoDB lite instance (GQL only).
    *
-   * @param options - Configuration for persistence.
+   * @param options - Configuration for persistence. Worker mode is not supported in the lite build.
    * @returns A ready-to-use database instance.
    */
-  static async create(options?: CreateOptions): Promise<GrafeoDB> {
+  static async create(options?: LiteCreateOptions): Promise<GrafeoDB> {
     await ensureLiteWasmInitialized();
 
     let persistence: PersistenceManager | null = null;
@@ -57,6 +59,7 @@ export class GrafeoDB {
       persistence = new PersistenceManager(
         options.persist,
         options.persistInterval,
+        options.onPersistError,
       );
       const snapshot = await persistence.load();
       if (snapshot) {
@@ -64,9 +67,13 @@ export class GrafeoDB {
           wasm = WasmDatabase.importSnapshot(snapshot);
         } catch (err) {
           console.warn(
-            `[grafeo-web] Persisted snapshot for "${options.persist}" is incompatible with this WASM version (likely a storage-format change). Starting with a fresh database. Export your data before upgrading to avoid data loss.`,
+            `[grafeo-web] Persisted snapshot for "${options.persist}" is incompatible with this WASM version (likely a storage-format change). Starting with a fresh database. The incompatible snapshot has been kept under the key "${options.persist}__backup".`,
             err,
           );
+          const backupPersistence = new PersistenceManager(
+            `${options.persist}__backup`,
+          );
+          await backupPersistence.save(snapshot);
           wasm = new WasmDatabase();
           await persistence.clear();
         }
@@ -86,24 +93,21 @@ export class GrafeoDB {
   }
 
   /** Executes a GQL query and returns results as an array of objects. */
-  async execute(
+  async execute<T extends Record<string, unknown> = Record<string, unknown>>(
     query: string,
     options?: LiteExecuteOptions,
-  ): Promise<Record<string, unknown>[]> {
+  ): Promise<T[]> {
     this.assertOpen();
     const params = options?.params;
     const result = params
       ? this.wasm!.executeWithParams(query, params)
       : this.wasm!.execute(query);
 
-    // Always save after execute: detecting mutations from query text is unreliable
-    // (e.g. "MATCH (n) DELETE n" does not start with a mutation keyword).
-    // The PersistenceManager debounce makes extra saves on reads harmless.
     if (this.persistence) {
       this.persistence.scheduleSave(() => this.wasm!.exportSnapshot());
     }
 
-    return result as Record<string, unknown>[];
+    return result as T[];
   }
 
   /** Executes a GQL query and returns raw columns, rows, and metadata. */
@@ -131,9 +135,9 @@ export class GrafeoDB {
   }
 
   /** Returns schema information (labels, edge types, property keys). */
-  async schema(): Promise<unknown> {
+  async schema(): Promise<SchemaInfo> {
     this.assertOpen();
-    return this.wasm!.schema();
+    return this.wasm!.schema() as SchemaInfo;
   }
 
   /**
@@ -226,8 +230,9 @@ export class GrafeoDB {
   /** Restores the database from a previously exported snapshot. */
   async import(snapshot: DatabaseSnapshot): Promise<void> {
     this.assertOpen();
+    const newWasm = WasmDatabase.importSnapshot(snapshot.data);
     this.wasm!.free();
-    this.wasm = WasmDatabase.importSnapshot(snapshot.data);
+    this.wasm = newWasm;
     if (this.persistence) {
       this.persistence.scheduleSave(() => this.wasm!.exportSnapshot());
     }
@@ -243,10 +248,14 @@ export class GrafeoDB {
     }
   }
 
-  /** Returns changes since the given timestamp. */
+  /**
+   * Returns changes since the given timestamp.
+   *
+   * @experimental Not yet implemented. Will be available when the WASM engine exposes change tracking.
+   */
   async changesSince(_timestamp: number): Promise<Change[]> {
     this.assertOpen();
-    return [];
+    throw new Error('changesSince() is not yet implemented: the WASM engine does not expose change tracking');
   }
 
   /** Releases WASM memory and closes any open resources. */

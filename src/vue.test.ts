@@ -174,6 +174,52 @@ describe('useQuery (Vue)', () => {
   });
 });
 
+describe('useQuery with Ref<string> query (Vue)', () => {
+  let db: GrafeoDBInstance;
+  let dbRef: Ref<GrafeoDBInstance | null>;
+
+  afterEach(async () => {
+    await db?.close();
+  });
+
+  it('re-executes when query ref changes', async () => {
+    db = await GrafeoDB.create();
+    await db.execute("INSERT (:Person {name: 'Alice'})");
+    await db.execute("INSERT (:Animal {name: 'Cat'})");
+    dbRef = ref(db) as Ref<GrafeoDBInstance | null>;
+
+    const queryRef = ref('MATCH (p:Person) RETURN p.name');
+    const executeSpy = vi.spyOn(db, 'execute');
+
+    const { result, unmount } = withSetup(() =>
+      useQuery(dbRef, queryRef),
+    );
+
+    await vi.waitFor(() => {
+      expect(result.loading.value).toBe(false);
+    });
+
+    expect(result.data.value).toHaveLength(1);
+    const initialCallCount = executeSpy.mock.calls.length;
+
+    // Change the query ref
+    queryRef.value = 'MATCH (a:Animal) RETURN a.name';
+
+    await vi.waitFor(() => {
+      expect(executeSpy.mock.calls.length).toBeGreaterThan(initialCallCount);
+    });
+
+    await vi.waitFor(() => {
+      expect(result.loading.value).toBe(false);
+    });
+
+    expect(result.data.value).toHaveLength(1);
+    expect((result.data.value as Record<string, unknown>[])[0]['a.name']).toBe('Cat');
+
+    unmount();
+  });
+});
+
 describe('T7: reactive query update (Vue)', () => {
   let db: GrafeoDBInstance;
   let dbRef: Ref<GrafeoDBInstance | null>;

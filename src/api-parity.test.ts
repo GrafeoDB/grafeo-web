@@ -72,45 +72,40 @@ describe('API parity', () => {
     it('schema reflects created node labels', async () => {
       await db.execute("INSERT (:Person {name: 'Alice', age: 30})");
 
-      const schema = (await db.schema()) as {
-        lpg: { labels: string[]; edgeTypes: string[]; propertyKeys: string[] };
-      };
+      const schema = await db.schema();
 
-      expect(schema.lpg.labels).toContain('Person');
-      expect(schema.lpg.propertyKeys).toContain('name');
-      expect(schema.lpg.propertyKeys).toContain('age');
+      const labelNames = schema.labels.map((l) => l.name);
+      expect(labelNames).toContain('Person');
+      expect(schema.property_keys).toContain('name');
+      expect(schema.property_keys).toContain('age');
     });
 
     it('schema updates after additional mutations', async () => {
       await db.execute("INSERT (:Person {name: 'Alice'})");
 
-      const schema1 = (await db.schema()) as {
-        lpg: { labels: string[]; edgeTypes: string[]; propertyKeys: string[] };
-      };
-      expect(schema1.lpg.labels).toContain('Person');
-      expect(schema1.lpg.edgeTypes).toHaveLength(0);
+      const schema1 = await db.schema();
+      const labelNames1 = schema1.labels.map((l) => l.name);
+      expect(labelNames1).toContain('Person');
+      expect(schema1.edge_types).toHaveLength(0);
 
       // Add a new label and edge type
       await db.execute(
         "INSERT (:Company {name: 'Acme'})-[:EMPLOYS]->(:Person {name: 'Bob'})",
       );
 
-      const schema2 = (await db.schema()) as {
-        lpg: { labels: string[]; edgeTypes: string[]; propertyKeys: string[] };
-      };
-      expect(schema2.lpg.labels).toContain('Person');
-      expect(schema2.lpg.labels).toContain('Company');
-      expect(schema2.lpg.edgeTypes).toContain('EMPLOYS');
+      const schema2 = await db.schema();
+      const labelNames2 = schema2.labels.map((l) => l.name);
+      expect(labelNames2).toContain('Person');
+      expect(labelNames2).toContain('Company');
+      expect(schema2.edge_types).toContain('EMPLOYS');
     });
 
     it('schema starts empty for a fresh database', async () => {
-      const schema = (await db.schema()) as {
-        lpg: { labels: string[]; edgeTypes: string[]; propertyKeys: string[] };
-      };
+      const schema = await db.schema();
 
-      expect(schema.lpg.labels).toHaveLength(0);
-      expect(schema.lpg.edgeTypes).toHaveLength(0);
-      expect(schema.lpg.propertyKeys).toHaveLength(0);
+      expect(schema.labels).toHaveLength(0);
+      expect(schema.edge_types).toHaveLength(0);
+      expect(schema.property_keys).toHaveLength(0);
     });
   });
 

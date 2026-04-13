@@ -53,21 +53,32 @@ describe('GrafeoDB', () => {
 
       const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
 
-      // Should recover gracefully instead of crashing
-      const recovered = await GrafeoDB.create({ persist: 'migration-test' });
-      expect(recovered).toBeDefined();
-      expect(recovered.isOpen).toBe(true);
-      // Fresh db should have 0 nodes
-      expect(await recovered.nodeCount()).toBe(0);
+      try {
+        // Should recover gracefully instead of crashing
+        const recovered = await GrafeoDB.create({ persist: 'migration-test' });
+        expect(recovered).toBeDefined();
+        expect(recovered.isOpen).toBe(true);
+        // Fresh db should have 0 nodes
+        expect(await recovered.nodeCount()).toBe(0);
 
-      expect(warnSpy).toHaveBeenCalledWith(
-        expect.stringContaining('incompatible with this WASM version'),
-        expect.any(Error),
-      );
+        expect(warnSpy).toHaveBeenCalledWith(
+          expect.stringContaining('incompatible with this WASM version'),
+          expect.any(Error),
+        );
 
-      Database.importSnapshot = originalImport;
-      warnSpy.mockRestore();
-      await recovered.close();
+        // Verify backup was saved under the __backup key
+        const { PersistenceManager } = await import('./persistence');
+        const backupPm = new PersistenceManager('migration-test__backup');
+        const backup = await backupPm.load();
+        expect(backup).not.toBeNull();
+        expect(backup).toBeInstanceOf(Uint8Array);
+        await backupPm.clear();
+
+        await recovered.close();
+      } finally {
+        Database.importSnapshot = originalImport;
+        warnSpy.mockRestore();
+      }
     });
   });
 
@@ -153,6 +164,27 @@ describe('GrafeoDB', () => {
       expect(results).toHaveLength(1);
       expect(results[0]['p.name']).toBe('Alice');
       await db2.close();
+    });
+
+    it('does not corrupt database on failed import', async () => {
+      await db.execute("INSERT (:Person {name: 'Alice'})");
+
+      // Import with corrupted data should throw but leave db usable
+      const badSnapshot = { version: 1, data: new Uint8Array([0xFF]), timestamp: Date.now() };
+      const { Database } = await import('./__mocks__/wasm');
+      const originalImport = Database.importSnapshot;
+      Database.importSnapshot = () => { throw new Error('Corrupt snapshot'); };
+
+      try {
+        await expect(db.import(badSnapshot)).rejects.toThrow('Corrupt snapshot');
+
+        // Database should still be usable after failed import
+        const results = await db.execute('MATCH (p:Person) RETURN p.name');
+        expect(results).toHaveLength(1);
+        expect(results[0]['p.name']).toBe('Alice');
+      } finally {
+        Database.importSnapshot = originalImport;
+      }
     });
   });
 
@@ -414,6 +446,20 @@ describe('GrafeoDB', () => {
     });
   });
 
+  describe('schema()', () => {
+    it('returns typed schema info', async () => {
+      await db.execute("INSERT (:Person {name: 'Alice'})");
+      const schema = await db.schema();
+      expect(schema).toHaveProperty('mode');
+      expect(schema).toHaveProperty('labels');
+      expect(schema).toHaveProperty('edge_types');
+      expect(schema).toHaveProperty('property_keys');
+      expect(Array.isArray(schema.labels)).toBe(true);
+      expect(schema.labels[0]).toHaveProperty('name');
+      expect(schema.labels[0]).toHaveProperty('count');
+    });
+  });
+
   describe('schema context', () => {
     it('setSchema/currentSchema/resetSchema round-trips', async () => {
       expect(await db.currentSchema()).toBeUndefined();
@@ -608,9 +654,8 @@ describe('GrafeoDB', () => {
   });
 
   describe('changesSince()', () => {
-    it('returns empty array (not yet implemented)', async () => {
-      const changes = await db.changesSince(0);
-      expect(changes).toEqual([]);
+    it('throws not-implemented error', async () => {
+      await expect(db.changesSince(0)).rejects.toThrow('not yet implemented');
     });
   });
 

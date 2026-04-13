@@ -2,6 +2,49 @@
 
 All notable changes to `@grafeo-db/web`.
 
+## [0.5.38] - 2026-04-13
+
+Hardening release, plus upstream 0.5.38 features.
+
+**Breaking:** `changesSince()` now throws an error instead of silently returning an empty array. Code that called `changesSince()` and handled the empty result will need a try/catch or should remove the call until the WASM engine exposes change tracking. `executeRaw()` signature narrowed from `ExecuteOptions` to `Pick<ExecuteOptions, 'language'>`: code that passed `params` to `executeRaw()` will get a TypeScript error (params were silently ignored before, so removing them is the correct fix).
+
+### Added
+
+- **`SchemaInfo` type**: `schema()` now returns a typed `SchemaInfo` instead of `unknown`, with `lpg.labels`, `lpg.edgeTypes`, and `lpg.propertyKeys` fields
+- **`onPersistError` callback**: `CreateOptions` accepts an optional error handler for IndexedDB persistence failures (defaults to `console.error`)
+- **Generic `execute<T>()`**: both full and lite builds support `execute<T>()` for type-safe query results
+- **`LiteCreateOptions` type**: lite build now uses its own options type without the `worker` field
+- **Quantized vector indexes**: `VectorIndexOptions.quantization` accepts `"scalar"`, `"binary"`, or `"product"` for up to 4x memory reduction (upstream 0.5.38)
+- **Vue reactive query string**: `useQuery()` now accepts `Ref<string>` in addition to plain `string`, re-executing when the ref changes
+
+### Fixed
+
+- **`import()` use-after-free**: `importSnapshot()` is now called before `free()` so a failed import leaves the database usable instead of in a corrupted state (index.ts, lite.ts, worker.ts)
+- **Persistence timer race**: `PersistenceManager` now tracks a `disposed` flag, preventing debounced save callbacks from firing after `close()`/`flush()`
+- **WorkerProxy double-init**: calling `init()` twice now terminates the old Worker and rejects its pending promises instead of orphaning it
+- **Worker double-init**: a second `init` message now frees the old WASM instance and flushes persistence instead of leaking memory
+- **Vue `useGrafeo` unmount race**: if the component unmounts before `GrafeoDB.create()` resolves, the created instance is now closed instead of leaked
+- **Svelte `createQuery` double-unsubscribe**: a guard flag prevents `unsubscribeDb()` from being called multiple times when stores unsubscribe concurrently
+- **Snapshot migration backup**: when a persisted snapshot is incompatible with the current WASM version, it is now saved under a `__backup` key before clearing, preventing silent data loss
+
+### Changed
+
+- **`@grafeo-db/wasm`**: updated to 0.5.38
+- **`@grafeo-db/wasm-lite`**: updated to 0.5.38
+- **`changesSince()` throws**: now throws `"not yet implemented"` instead of silently returning `[]`
+- **`executeRaw()` type narrowed**: signature changed from `ExecuteOptions` to `Pick<ExecuteOptions, 'language'>` to clarify that `params` is not supported for raw queries
+
+### Engine highlights (via Grafeo Core 0.5.38)
+
+- **Quantized vector indexes**: `"scalar"`, `"binary"`, `"product"` quantization for up to 4x memory savings
+- **EXPLAIN for all 6 query languages**: Gremlin, GraphQL, and SQL/PGQ now support `EXPLAIN`/`EXPLAIN ANALYZE` (not yet exposed in WASM bindings)
+- **Unicode identifiers**: GQL, Cypher, and SQL/PGQ parsers accept Unicode letters per ISO GQL 39075
+- **Parser recursion depth limits**: 128-level nesting cap prevents stack overflow on malicious input
+- **Weighted hybrid search fix**: vector distances are now negated before fusion so closer vectors rank higher
+- **Edge variables in multi-hop queries**: edge columns now resolve to full maps instead of raw IDs
+- **GQL `!=` operator**: accepted as alias for `<>`
+
+
 ## [0.5.37] - 2026-04-12
 
 _Align with Grafeo Core 0.5.37_

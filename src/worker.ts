@@ -40,6 +40,16 @@ async function handleMessage(request: WorkerRequest): Promise<void> {
   try {
     switch (method) {
       case 'init': {
+        // Guard against double-init: free existing resources first
+        if (db) {
+          if (persistence) {
+            await persistence.flush(() => db!.exportSnapshot());
+            persistence = null;
+          }
+          db.free();
+          db = null;
+        }
+
         await init();
 
         const options = args[0] as { persist?: string; persistInterval?: number } | undefined;
@@ -145,8 +155,9 @@ async function handleMessage(request: WorkerRequest): Promise<void> {
       case 'import': {
         if (!db) throw new Error('Database not initialized');
         const snapshot = args[0] as { data: Uint8Array };
+        const newDb = Database.importSnapshot(snapshot.data);
         db.free();
-        db = Database.importSnapshot(snapshot.data);
+        db = newDb;
 
         if (persistence) {
           persistence.scheduleSave(() => db!.exportSnapshot());

@@ -9,6 +9,18 @@ export interface CreateOptions {
   worker?: boolean | Worker;
   /** Debounce interval (ms) for IndexedDB writes. Default: 1000. */
   persistInterval?: number;
+  /** Called when an IndexedDB persistence error occurs. Defaults to `console.error`. */
+  onPersistError?: (error: Error) => void;
+}
+
+/** Options for creating a GrafeoDB lite instance (no worker support). */
+export interface LiteCreateOptions {
+  /** IndexedDB key for persistent storage. Omit for in-memory only. */
+  persist?: string;
+  /** Debounce interval (ms) for IndexedDB writes. Default: 1000. */
+  persistInterval?: number;
+  /** Called when an IndexedDB persistence error occurs. Defaults to `console.error`. */
+  onPersistError?: (error: Error) => void;
 }
 
 /** Options for query execution. */
@@ -123,6 +135,8 @@ export interface VectorIndexOptions {
   m?: number;
   /** HNSW build beam width. */
   efConstruction?: number;
+  /** Quantization strategy for memory reduction: "scalar", "binary", or "product". */
+  quantization?: 'scalar' | 'binary' | 'product';
 }
 
 /** Options for vector k-NN search. */
@@ -195,6 +209,20 @@ export interface MemoryUsage {
   string_pool: { total_bytes: number };
   buffer_manager: { total_bytes: number };
   [key: string]: unknown;
+}
+
+/** A label entry returned by schema(). */
+export interface SchemaLabel {
+  name: string;
+  count: number;
+}
+
+/** Schema information returned by schema(). */
+export interface SchemaInfo {
+  mode: string;
+  labels: SchemaLabel[];
+  edge_types: string[];
+  property_keys: string[];
 }
 
 /** Message sent from main thread to worker. */
