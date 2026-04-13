@@ -1,6 +1,6 @@
 {
   "name": "@grafeo-db/web",
-  "version": "0.5.37",
+  "version": "0.5.38",
   "description": "Grafeo graph database in the browser - WebAssembly powered, zero backend",
   "keywords": [
     "grafeo",
@@ -96,8 +96,8 @@
     "prepublishOnly": "npm run build"
   },
   "dependencies": {
-    "@grafeo-db/wasm": "^0.5.37",
-    "@grafeo-db/wasm-lite": "^0.5.37"
+    "@grafeo-db/wasm": "^0.5.38",
+    "@grafeo-db/wasm-lite": "^0.5.38"
   },
   "peerDependencies": {
     "react": ">=19",
