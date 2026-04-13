@@ -5,10 +5,12 @@
  * WASM engine. Run with: npx vitest run --config vitest.integration.config.ts
  */
 import { readFile } from 'node:fs/promises';
-import { resolve } from 'node:path';
+import { dirname, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 
 // Load the WASM module manually for Node.js (no fetch/URL support)
+const __dirname = dirname(fileURLToPath(import.meta.url));
 const wasmPath = resolve(__dirname, '../../node_modules/@grafeo-db/wasm/grafeo_wasm_bg.wasm');
 const wasmModule = await import('@grafeo-db/wasm');
 const wasmBytes = await readFile(wasmPath);

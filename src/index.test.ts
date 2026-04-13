@@ -53,29 +53,32 @@ describe('GrafeoDB', () => {
 
       const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
 
-      // Should recover gracefully instead of crashing
-      const recovered = await GrafeoDB.create({ persist: 'migration-test' });
-      expect(recovered).toBeDefined();
-      expect(recovered.isOpen).toBe(true);
-      // Fresh db should have 0 nodes
-      expect(await recovered.nodeCount()).toBe(0);
+      try {
+        // Should recover gracefully instead of crashing
+        const recovered = await GrafeoDB.create({ persist: 'migration-test' });
+        expect(recovered).toBeDefined();
+        expect(recovered.isOpen).toBe(true);
+        // Fresh db should have 0 nodes
+        expect(await recovered.nodeCount()).toBe(0);
 
-      expect(warnSpy).toHaveBeenCalledWith(
-        expect.stringContaining('incompatible with this WASM version'),
-        expect.any(Error),
-      );
+        expect(warnSpy).toHaveBeenCalledWith(
+          expect.stringContaining('incompatible with this WASM version'),
+          expect.any(Error),
+        );
 
-      // Verify backup was saved under the __backup key
-      const { PersistenceManager } = await import('./persistence');
-      const backupPm = new PersistenceManager('migration-test__backup');
-      const backup = await backupPm.load();
-      expect(backup).not.toBeNull();
-      expect(backup).toBeInstanceOf(Uint8Array);
-      await backupPm.clear();
+        // Verify backup was saved under the __backup key
+        const { PersistenceManager } = await import('./persistence');
+        const backupPm = new PersistenceManager('migration-test__backup');
+        const backup = await backupPm.load();
+        expect(backup).not.toBeNull();
+        expect(backup).toBeInstanceOf(Uint8Array);
+        await backupPm.clear();
 
-      Database.importSnapshot = originalImport;
-      warnSpy.mockRestore();
-      await recovered.close();
+        await recovered.close();
+      } finally {
+        Database.importSnapshot = originalImport;
+        warnSpy.mockRestore();
+      }
     });
   });
 
@@ -172,14 +175,16 @@ describe('GrafeoDB', () => {
       const originalImport = Database.importSnapshot;
       Database.importSnapshot = () => { throw new Error('Corrupt snapshot'); };
 
-      await expect(db.import(badSnapshot)).rejects.toThrow('Corrupt snapshot');
+      try {
+        await expect(db.import(badSnapshot)).rejects.toThrow('Corrupt snapshot');
 
-      // Database should still be usable after failed import
-      const results = await db.execute('MATCH (p:Person) RETURN p.name');
-      expect(results).toHaveLength(1);
-      expect(results[0]['p.name']).toBe('Alice');
-
-      Database.importSnapshot = originalImport;
+        // Database should still be usable after failed import
+        const results = await db.execute('MATCH (p:Person) RETURN p.name');
+        expect(results).toHaveLength(1);
+        expect(results[0]['p.name']).toBe('Alice');
+      } finally {
+        Database.importSnapshot = originalImport;
+      }
     });
   });
 

@@ -41,20 +41,23 @@ describe('GrafeoDB (lite)', () => {
 
       const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
 
-      // Should recover gracefully instead of crashing
-      const recovered = await GrafeoDB.create({ persist: 'lite-migration-test' });
-      expect(recovered).toBeDefined();
-      expect(recovered.isOpen).toBe(true);
-      expect(await recovered.nodeCount()).toBe(0);
+      try {
+        // Should recover gracefully instead of crashing
+        const recovered = await GrafeoDB.create({ persist: 'lite-migration-test' });
+        expect(recovered).toBeDefined();
+        expect(recovered.isOpen).toBe(true);
+        expect(await recovered.nodeCount()).toBe(0);
 
-      expect(warnSpy).toHaveBeenCalledWith(
-        expect.stringContaining('incompatible with this WASM version'),
-        expect.any(Error),
-      );
+        expect(warnSpy).toHaveBeenCalledWith(
+          expect.stringContaining('incompatible with this WASM version'),
+          expect.any(Error),
+        );
 
-      Database.importSnapshot = originalImport;
-      warnSpy.mockRestore();
-      await recovered.close();
+        await recovered.close();
+      } finally {
+        Database.importSnapshot = originalImport;
+        warnSpy.mockRestore();
+      }
     });
   });
 

@@ -251,23 +251,26 @@ describe('Worker message handler', () => {
 
       const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
 
-      // Should recover gracefully
-      const res = await send('init', [{ persist: 'worker-migration-test' }], 93);
-      expect(res.result).toBe(true);
-      expect(res.error).toBeUndefined();
+      try {
+        // Should recover gracefully
+        const res = await send('init', [{ persist: 'worker-migration-test' }], 93);
+        expect(res.result).toBe(true);
+        expect(res.error).toBeUndefined();
 
-      // Fresh db should have 0 nodes
-      const countRes = await send('nodeCount', [], 94);
-      expect(countRes.result).toBe(0);
+        // Fresh db should have 0 nodes
+        const countRes = await send('nodeCount', [], 94);
+        expect(countRes.result).toBe(0);
 
-      expect(warnSpy).toHaveBeenCalledWith(
-        expect.stringContaining('incompatible with this WASM version'),
-        expect.any(Error),
-      );
+        expect(warnSpy).toHaveBeenCalledWith(
+          expect.stringContaining('incompatible with this WASM version'),
+          expect.any(Error),
+        );
 
-      Database.importSnapshot = originalImport;
-      warnSpy.mockRestore();
-      await send('close', [], 95);
+        await send('close', [], 95);
+      } finally {
+        Database.importSnapshot = originalImport;
+        warnSpy.mockRestore();
+      }
     });
   });
 

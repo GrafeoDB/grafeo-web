@@ -1,4 +1,4 @@
-import { isRef, onUnmounted, ref, toValue, watch, type Ref } from 'vue';
+import { isRef, onUnmounted, ref, unref, watch, type Ref } from 'vue';
 
 import { GrafeoDB } from './index';
 import type { CreateOptions, ExecuteOptions } from './types';
@@ -95,7 +95,7 @@ export function useQuery<T = Record<string, unknown>[]>(
     [db, querySource, version],
     async () => {
       const database = db.value;
-      const queryStr = toValue(query);
+      const queryStr = unref(query);
       if (!database) {
         loading.value = true;
         return;

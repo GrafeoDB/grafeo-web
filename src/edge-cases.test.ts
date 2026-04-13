@@ -721,6 +721,48 @@ describe('framework edge cases: Svelte createQuery cleanup', () => {
     await close();
   });
 
+  it('re-subscribing after full unsubscribe still receives db changes', async () => {
+    const { createQuery } = await import('./svelte');
+
+    const db = await GrafeoDB.create();
+    await db.execute("INSERT (:Person {name: 'Alice'})");
+
+    const dbStore = {
+      subscribe(fn: (v: GrafeoDBInstance | null) => void) {
+        fn(db);
+        return () => {};
+      },
+    };
+
+    const { data, loading: qLoading } = createQuery(
+      dbStore,
+      'MATCH (p:Person) RETURN p.name',
+    );
+
+    // First subscribe cycle
+    let qCurrentLoading = true;
+    let unsub1 = qLoading.subscribe((v) => { qCurrentLoading = v; });
+    const unsubData1 = data.subscribe(() => {});
+    await vi.waitFor(() => expect(qCurrentLoading).toBe(false));
+    // Unsubscribe all: triggers cleanupIfEmpty
+    unsub1();
+    unsubData1();
+
+    // Re-subscribe: should still work (not be permanently dead)
+    let currentData: Record<string, unknown>[] | null = null;
+    qCurrentLoading = true;
+    unsub1 = qLoading.subscribe((v) => { qCurrentLoading = v; });
+    const unsubData2 = data.subscribe((v) => { currentData = v as Record<string, unknown>[] | null; });
+
+    await vi.waitFor(() => expect(qCurrentLoading).toBe(false));
+    expect(currentData).not.toBeNull();
+    expect(currentData).toHaveLength(1);
+
+    unsub1();
+    unsubData2();
+    await db.close();
+  });
+
   it('query error state is set when execute throws', async () => {
     const { createQuery } = await import('./svelte');
 

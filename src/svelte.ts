@@ -194,10 +194,20 @@ export function createQuery<T = Record<string, unknown>[]>(
 
   // Subscribe to db store changes
   let dbUnsubscribed = false;
-  const unsubscribeDb = db.subscribe((database) => {
+  let unsubscribeDb = db.subscribe((database) => {
     currentDb = database;
     executeQuery();
   });
+
+  function ensureDbSubscribed(): void {
+    if (dbUnsubscribed) {
+      dbUnsubscribed = false;
+      unsubscribeDb = db.subscribe((database) => {
+        currentDb = database;
+        executeQuery();
+      });
+    }
+  }
 
   function cleanupIfEmpty(): void {
     if (!dbUnsubscribed && dataSubscribers.size === 0 && loadingSubscribers.size === 0 && errorSubscribers.size === 0) {
@@ -208,6 +218,7 @@ export function createQuery<T = Record<string, unknown>[]>(
 
   const data: Readable<T | null> = {
     subscribe(fn) {
+      ensureDbSubscribed();
       dataSubscribers.add(fn);
       fn(currentData);
       return () => {
@@ -219,6 +230,7 @@ export function createQuery<T = Record<string, unknown>[]>(
 
   const loading: Readable<boolean> = {
     subscribe(fn) {
+      ensureDbSubscribed();
       loadingSubscribers.add(fn);
       fn(currentLoading);
       return () => {
@@ -230,6 +242,7 @@ export function createQuery<T = Record<string, unknown>[]>(
 
   const error: Readable<Error | null> = {
     subscribe(fn) {
+      ensureDbSubscribed();
       errorSubscribers.add(fn);
       fn(currentError);
       return () => {
