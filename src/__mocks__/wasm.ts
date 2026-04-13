@@ -234,12 +234,16 @@ export class Database {
 
   schema(): unknown {
     this.assertNotFreed();
-    const labels = [...new Set(this.nodes.flatMap((n) => n.labels))];
-    const edgeTypes = [...new Set(this.edges.map((e) => e.type))];
-    const propertyKeys = [
+    const labelSet = [...new Set(this.nodes.flatMap((n) => n.labels))];
+    const labels = labelSet.map((name) => ({
+      name,
+      count: this.nodes.filter((n) => n.labels.includes(name)).length,
+    }));
+    const edge_types = [...new Set(this.edges.map((e) => e.type))];
+    const property_keys = [
       ...new Set(this.nodes.flatMap((n) => Object.keys(n.properties))),
     ];
-    return { lpg: { labels, edgeTypes, propertyKeys } };
+    return { mode: 'lpg', labels, edge_types, property_keys };
   }
 
   setSchema(name: string): void {

@@ -44,6 +44,7 @@ export class PersistenceManager {
   private interval: number;
   private timer: ReturnType<typeof setTimeout> | null = null;
   private dirty = false;
+  private disposed = false;
   private onError: (error: Error) => void;
 
   constructor(
@@ -93,6 +94,7 @@ export class PersistenceManager {
    * when the debounce timer fires to get the latest state.
    */
   scheduleSave(getSnapshot: () => Uint8Array): void {
+    if (this.disposed) return;
     this.dirty = true;
 
     if (this.timer !== null) {
@@ -101,7 +103,7 @@ export class PersistenceManager {
 
     this.timer = setTimeout(async () => {
       this.timer = null;
-      if (this.dirty) {
+      if (this.dirty && !this.disposed) {
         this.dirty = false;
         try {
           const snapshot = getSnapshot();
@@ -113,17 +115,18 @@ export class PersistenceManager {
     }, this.interval);
   }
 
-  /** Flush any pending save immediately. */
+  /** Flush any pending save immediately and mark as disposed. */
   async flush(getSnapshot: () => Uint8Array): Promise<void> {
     if (this.timer !== null) {
       clearTimeout(this.timer);
       this.timer = null;
     }
-    if (this.dirty) {
+    if (this.dirty && !this.disposed) {
       this.dirty = false;
       const snapshot = getSnapshot();
       await this.save(snapshot);
     }
+    this.disposed = true;
   }
 
   /** Delete the persisted snapshot for this key. */

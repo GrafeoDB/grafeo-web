@@ -102,6 +102,38 @@ describe('PersistenceManager', () => {
     });
   });
 
+  describe('disposed guard', () => {
+    it('does not save after flush()', async () => {
+      const getSnapshot = () => new Uint8Array([1, 2, 3]);
+      await pm.flush(getSnapshot);
+
+      // After flush, scheduleSave should be a no-op
+      const saveSpy = vi.spyOn(pm, 'save');
+      pm.scheduleSave(() => new Uint8Array([4, 5, 6]));
+
+      // Wait for debounce
+      await new Promise((r) => setTimeout(r, 1200));
+      expect(saveSpy).not.toHaveBeenCalled();
+      saveSpy.mockRestore();
+    });
+  });
+
+  describe('onError callback', () => {
+    it('calls custom error handler on save failure', async () => {
+      const errors: Error[] = [];
+      const pm2 = new PersistenceManager('error-test', 50, (err) => errors.push(err));
+
+      // Schedule a save with a callback that throws
+      pm2.scheduleSave(() => { throw new Error('snapshot failed'); });
+
+      // Wait for debounce to fire
+      await new Promise((r) => setTimeout(r, 200));
+      expect(errors).toHaveLength(1);
+      expect(errors[0].message).toBe('snapshot failed');
+      await pm2.clear();
+    });
+  });
+
   describe('isolation between keys', () => {
     it('different keys store different snapshots', async () => {
       const pm2 = new PersistenceManager('other-key');

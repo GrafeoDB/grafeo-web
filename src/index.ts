@@ -22,6 +22,8 @@ import type {
   RdfImportResult,
   RdfLiteral,
   RdfTriple,
+  SchemaInfo,
+  SchemaLabel,
   SearchResult,
   StorageStats,
   VectorIndexOptions,
@@ -48,6 +50,8 @@ export type {
   RdfImportResult,
   RdfLiteral,
   RdfTriple,
+  SchemaInfo,
+  SchemaLabel,
   SearchResult,
   StorageStats,
   VectorIndexOptions,
@@ -119,6 +123,7 @@ export class GrafeoDB {
       persistence = new PersistenceManager(
         options.persist,
         options.persistInterval,
+        options.onPersistError,
       );
       const snapshot = await persistence.load();
       if (snapshot) {
@@ -126,9 +131,14 @@ export class GrafeoDB {
           wasm = WasmDatabase.importSnapshot(snapshot);
         } catch (err) {
           console.warn(
-            `[grafeo-web] Persisted snapshot for "${options.persist}" is incompatible with this WASM version (likely a storage-format change). Starting with a fresh database. Export your data before upgrading to avoid data loss.`,
+            `[grafeo-web] Persisted snapshot for "${options.persist}" is incompatible with this WASM version (likely a storage-format change). Starting with a fresh database. The incompatible snapshot has been kept under the key "${options.persist}__backup".`,
             err,
           );
+          // Backup the incompatible snapshot before clearing
+          const backupPersistence = new PersistenceManager(
+            `${options.persist}__backup`,
+          );
+          await backupPersistence.save(snapshot);
           wasm = new WasmDatabase();
           await persistence.clear();
         }
@@ -162,34 +172,31 @@ export class GrafeoDB {
    * @param options - Optional execution options (language selection).
    * @returns Array of result rows as key-value objects.
    */
-  async execute(
+  async execute<T extends Record<string, unknown> = Record<string, unknown>>(
     query: string,
     options?: ExecuteOptions,
-  ): Promise<Record<string, unknown>[]> {
+  ): Promise<T[]> {
     this.assertOpen();
 
     if (this.proxy) {
-      return this.proxy.execute(query, options);
+      return this.proxy.execute(query, options) as Promise<T[]>;
     }
 
     const lang = options?.language;
     const params = options?.params;
     const hasLang = lang && lang !== 'gql';
 
-    let result: Record<string, unknown>[];
+    let result: T[];
     if (hasLang && params) {
-      result = this.wasm!.executeWithLanguageAndParams(query, lang, params) as Record<string, unknown>[];
+      result = this.wasm!.executeWithLanguageAndParams(query, lang, params) as T[];
     } else if (hasLang) {
-      result = this.wasm!.executeWithLanguage(query, lang) as Record<string, unknown>[];
+      result = this.wasm!.executeWithLanguage(query, lang) as T[];
     } else if (params) {
-      result = this.wasm!.executeWithParams(query, params) as Record<string, unknown>[];
+      result = this.wasm!.executeWithParams(query, params) as T[];
     } else {
-      result = this.wasm!.execute(query) as Record<string, unknown>[];
+      result = this.wasm!.execute(query) as T[];
     }
 
-    // Always save after execute: detecting mutations from query text is unreliable
-    // (e.g. "MATCH (n) DELETE n" does not start with a mutation keyword).
-    // The PersistenceManager debounce makes extra saves on reads harmless.
     if (this.persistence) {
       this.persistence.scheduleSave(() => this.wasm!.exportSnapshot());
     }
@@ -200,11 +207,14 @@ export class GrafeoDB {
   /**
    * Executes a query and returns raw columns, rows, and metadata.
    *
+   * Note: `params` in options is not supported for raw queries and will be ignored.
+   * Use `execute()` for parameterized queries.
+   *
    * @param query - The query string.
    * @param options - Optional execution options (language selection).
    * @returns Raw result with columns, rows, and optional execution time.
    */
-  async executeRaw(query: string, options?: ExecuteOptions): Promise<RawQueryResult> {
+  async executeRaw(query: string, options?: Pick<ExecuteOptions, 'language'>): Promise<RawQueryResult> {
     this.assertOpen();
 
     if (this.proxy) {
@@ -242,12 +252,12 @@ export class GrafeoDB {
   }
 
   /** Returns schema information (labels, edge types, property keys). */
-  async schema(): Promise<unknown> {
+  async schema(): Promise<SchemaInfo> {
     this.assertOpen();
     if (this.proxy) {
-      return this.proxy.schema();
+      return this.proxy.schema() as Promise<SchemaInfo>;
     }
-    return this.wasm!.schema();
+    return this.wasm!.schema() as SchemaInfo;
   }
 
   /** Returns IndexedDB storage usage statistics. */
@@ -282,8 +292,9 @@ export class GrafeoDB {
     if (this.proxy) {
       return this.proxy.import(snapshot);
     }
+    const newWasm = WasmDatabase.importSnapshot(snapshot.data);
     this.wasm!.free();
-    this.wasm = WasmDatabase.importSnapshot(snapshot.data);
+    this.wasm = newWasm;
     if (this.persistence) {
       this.persistence.scheduleSave(() => this.wasm!.exportSnapshot());
     }
@@ -308,13 +319,11 @@ export class GrafeoDB {
   /**
    * Returns changes since the given timestamp.
    *
-   * Note: Requires change tracking support in the WASM engine.
-   * Currently returns an empty array.
+   * @experimental Not yet implemented. Will be available when the WASM engine exposes change tracking.
    */
   async changesSince(_timestamp: number): Promise<Change[]> {
     this.assertOpen();
-    // TODO: Implement when WASM engine exposes change tracking API
-    return [];
+    throw new Error('changesSince() is not yet implemented: the WASM engine does not expose change tracking');
   }
 
   /** Creates a BM25 text index on a label/property. Requires 'text-index' WASM feature. */

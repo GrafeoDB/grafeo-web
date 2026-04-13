@@ -1,7 +1,7 @@
 /**
  * Type declarations for @grafeo-db/wasm and @grafeo-db/wasm-lite.
  *
- * These mirror the wasm-bindgen generated types from the WASM crate (v0.5.37).
+ * These mirror the wasm-bindgen generated types from the WASM crate (v0.5.38).
  * Both variants expose the same API surface; the lite variant simply omits
  * multi-language and AI search features at the WASM level.
  *
@@ -120,8 +120,14 @@ declare module '@grafeo-db/wasm' {
       }>;
     }): { triples: number };
 
-    /** Creates an HNSW vector index. Requires 'vector-index' feature. */
-    createVectorIndex(label: string, property: string, options?: object): void;
+    /** Creates an HNSW vector index. Requires 'vector-index' feature. Options include dimensions, metric, m, efConstruction, quantization. */
+    createVectorIndex(label: string, property: string, options?: {
+      dimensions?: number;
+      metric?: string;
+      m?: number;
+      efConstruction?: number;
+      quantization?: string;
+    }): void;
 
     /** Drops a vector index. Returns true if one existed. Requires 'vector-index' feature. */
     dropVectorIndex(label: string, property: string): boolean;

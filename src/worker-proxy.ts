@@ -11,6 +11,7 @@ import type {
   RawQueryResult,
   RdfImportData,
   RdfImportResult,
+  SchemaInfo,
   SearchResult,
   StorageStats,
   VectorIndexOptions,
@@ -38,6 +39,16 @@ export class WorkerProxy {
 
   /** Initialize the Worker and the WASM database inside it. */
   async init(options?: CreateOptions): Promise<void> {
+    // Guard against double-init: terminate existing worker first
+    if (this.worker) {
+      this.worker.terminate();
+      for (const request of this.pending.values()) {
+        request.reject(new Error('Worker re-initialized'));
+      }
+      this.pending.clear();
+      this.worker = null;
+    }
+
     if (options?.worker instanceof Worker) {
       // Use pre-created Worker (bundler-friendly: caller handles URL resolution)
       this.worker = options.worker;
@@ -112,7 +123,7 @@ export class WorkerProxy {
     >[];
   }
 
-  async executeRaw(query: string, options?: ExecuteOptions): Promise<RawQueryResult> {
+  async executeRaw(query: string, options?: Pick<ExecuteOptions, 'language'>): Promise<RawQueryResult> {
     return (await this.send('executeRaw', [query, options])) as RawQueryResult;
   }
 
@@ -124,8 +135,8 @@ export class WorkerProxy {
     return (await this.send('edgeCount')) as number;
   }
 
-  async schema(): Promise<unknown> {
-    return this.send('schema');
+  async schema(): Promise<SchemaInfo> {
+    return (await this.send('schema')) as SchemaInfo;
   }
 
   async storageStats(): Promise<StorageStats> {
