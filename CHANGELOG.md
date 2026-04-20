@@ -2,6 +2,16 @@
 
 All notable changes to `@grafeo-db/web`.
 
+## [0.5.40-hotfix.1] - 2026-04-20
+
+### Fixed
+
+- **WASM init compatibility with `--target bundler` builds**: `wasm-init.ts`, `wasm-init-lite.ts`, and `worker.ts` unconditionally called the `default` export of `@grafeo-db/wasm` / `@grafeo-db/wasm-lite`. When the underlying package is built with `wasm-pack --target bundler`, the module auto-initializes on import and exposes no `default` export, so the call threw at `create()`. The initializers now use a namespace import and only invoke `default()` when it exists; otherwise they resolve immediately. Users on wasm packages built with `--target web` (which ship a `__wbg_init` default export) are unaffected.
+
+### Added
+
+- **Integration test: advertised query languages are compiled in**: `tests/integration/wasm-real.test.ts` now probes every language exposed through `executeWithLanguage()` (`gql`, `cypher`, `sparql`, `gremlin`, `graphql`, `sql`) and asserts the dispatcher does not return "Unknown query language". This guards against the wasm package being accidentally built with a narrow feature set (e.g. `--features ai`) instead of `--features full`.
+
 ## [0.5.40] - 2026-04-20
 
 Upstream 0.5.39 + 0.5.40 features. No new WASM API surface; version bump, documentation corrections, and behavioral notes.
