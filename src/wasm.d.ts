@@ -181,7 +181,10 @@ declare module '@grafeo-db/wasm' {
     /** Clears the query plan cache. */
     clearPlanCache(): void;
 
-    /** Converts the database to CompactStore format. Requires 'compact-store' WASM feature. */
+    /**
+     * Rebuilds the database into a layered CompactStore (columnar base + writable overlay).
+     * Non-destructive: writes after compaction land in the overlay. Requires 'compact-store' feature.
+     */
     compact(): void;
 
     /** Returns a hierarchical memory usage breakdown. */
