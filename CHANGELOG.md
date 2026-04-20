@@ -4,12 +4,35 @@ All notable changes to `@grafeo-db/web`.
 
 ## [0.5.40] - 2026-04-20
 
-_Align with Grafeo Core 0.5.40_
+Upstream 0.5.39 + 0.5.40 features. No new WASM API surface; version bump, documentation corrections, and behavioral notes.
 
 ### Changed
 
 - **`@grafeo-db/wasm`**: updated to 0.5.40
 - **`@grafeo-db/wasm-lite`**: updated to 0.5.40
+- **`compact()` is now non-destructive**: the underlying Grafeo Core `compact()` builds a writable layered store (columnar base + in-memory overlay) instead of switching to read-only mode. Writes after `compact()` land in the overlay; reads merge both layers. Documentation and type-declaration comments updated to reflect this.
+- **`memoryUsage()` totals**: Grafeo Core 0.5.40 broadened `memory_bytes` accounting to cover the full heap (store + indexes + MVCC + caches + string pools + buffer manager), so reported values will be larger than before at the same workload. No schema change, no API change.
+
+### Engine highlights (via Grafeo Core 0.5.39-0.5.40)
+
+- **Unified hybrid queries**: `text_score()` and `text_match()` usable as filter expressions in GQL/Cypher, with planner pushdown to `TextScan`/`VectorScan`, compound AND/OR joins, top-K recognition, and score projection
+- **BM25 text scan operator**: top-K and threshold modes via `InvertedIndex.score_document`, `search_with_threshold`, `bm25_term_score`
+- **Native Float64 / Float32Vector codecs**: CompactStore stores them directly instead of falling back to dictionary encoding; mixed `Int64+Float64` columns coalesce to Float64
+- **MERGE index lookup**: `MERGE (n:Label {prop: value})` now uses property indexes when available, eliminating O(n) scan on large graphs
+- **Multi-schema transaction atomicity**: `SESSION SET SCHEMA` mid-transaction no longer loses pre-switch writes on COMMIT
+- **Commit failure auto-rollback**: a failed COMMIT now discards pending writes and returns the session to a clean state
+- **Schema and graph names reject `/`**: `CREATE SCHEMA` / `CREATE GRAPH` now fail on names containing `/`, surfaced through `setSchema()` as a WASM error
+- **Vector strict pushdown boundary**: `euclidean_distance(...) < t` and `manhattan_distance(...) < t` now correctly exclude rows at exactly the threshold
+- **Compact-store correctness**: ~26 vector/text index methods no longer panic after `compact()`; `LayeredStore` sees nodes added after compaction; named graphs carry across `compact()` / `recompact()`; `nodes_by_label` drops redundant lock acquisition per chunk
+- **Parser keyword anti-pattern fixes**: four `CREATE CONSTRAINT ... FOR` / `ON REPLACE` sites where identifier-fallback tokenization accepted the wrong keyword
+- **Block-STM conflict partitioning** (0.5.39): groups conflicting transactions into disjoint clusters for parallel re-execution
+- **Push-based pipeline execution** (0.5.39): filter, sort, aggregate, limit, and distinct queries now flow through a push pipeline, reducing per-row overhead
+- **Parser overflow hardening** (0.5.39): integer overflow in Cypher, SQL/PGQ, Gremlin, GraphQL now returns errors instead of silently producing `0`; float overflow (`1e999`) in GraphQL rejected
+- **Resource limits** (0.5.39): Grafeo Core now defaults to 30-second query timeout, 16 MiB property value size limit, HNSW `max_elements` bound
+- **Parameters in subqueries** (0.5.39): `$param` inside `EXISTS` / `COUNT` / `VALUE` subqueries now substituted correctly
+- **SSI validation race, deadlock ordering, DPccp `BitSet` overflow, DISTINCT hash collisions** (0.5.39): a sweep of transaction/planner fixes
+- **Leaner WASM builds** (0.5.39): removed `grafeo-storage`, `crc32fast`, `anyhow` from WASM targets; binary size now ~650 KB gzipped
+- Not yet in WASM: streaming results (`executeStream()` is Node.js-only), `metrics()` / `metricsPrometheus()` (Python/Node.js), encryption at rest, `GrafeoError` structured errors
 
 
 ## [0.5.38] - 2026-04-13

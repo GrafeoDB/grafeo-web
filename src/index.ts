@@ -551,7 +551,12 @@ export class GrafeoDB {
     return this.wasm!.currentSchema();
   }
 
-  /** Converts the database to CompactStore format. Requires 'compact-store' WASM feature. */
+  /**
+   * Rebuilds the database into a layered CompactStore: a columnar read-optimized base
+   * with a writable overlay. Non-destructive: writes after `compact()` land in the overlay,
+   * reads merge both layers. Gives large memory and traversal wins for mostly-read workloads.
+   * Requires 'compact-store' WASM feature.
+   */
   async compact(): Promise<void> {
     this.assertOpen();
     if (this.proxy) {
