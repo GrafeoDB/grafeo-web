@@ -210,6 +210,40 @@ describe('Real WASM: Bulk import', () => {
   });
 });
 
+describe('Real WASM: advertised query languages are compiled in', () => {
+  // Guards against the main pkg being built without a language feature flag
+  // (e.g. --features ai instead of --features full), which would make
+  // executeWithLanguage throw "Unknown query language: '<lang>'" at runtime.
+  //
+  // We do NOT assert the query succeeds - parse/semantic errors on an empty
+  // DB are acceptable. We only assert the dispatcher recognised the language.
+  const probes: { language: string; query: string }[] = [
+    { language: 'gql', query: 'MATCH (n) RETURN n' },
+    { language: 'cypher', query: 'MATCH (n) RETURN n' },
+    { language: 'sparql', query: 'SELECT ?s ?p ?o WHERE { ?s ?p ?o }' },
+    { language: 'gremlin', query: 'g.V()' },
+    { language: 'graphql', query: '{ __typename }' },
+    { language: 'sql', query: 'SELECT * FROM GRAPH_TABLE (MATCH (n) COLUMNS (n AS x)) AS g' },
+  ];
+
+  for (const { language, query } of probes) {
+    it(`dispatches '${language}' without "Unknown query language"`, () => {
+      const db = new Database();
+      try {
+        db.executeWithLanguage(query, language);
+      } catch (e) {
+        const msg = (e as Error).message;
+        expect(
+          msg,
+          `language '${language}' not compiled into main pkg - rebuild with --features full`,
+        ).not.toContain('Unknown query language');
+      } finally {
+        db.free();
+      }
+    });
+  }
+});
+
 describe('Real WASM: info and memoryUsage', () => {
   it('info returns database metadata', () => {
     const db = new Database();

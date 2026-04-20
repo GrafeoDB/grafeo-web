@@ -4,16 +4,23 @@
  * This file runs inside a dedicated Worker. It loads the WASM module,
  * creates a Database instance, and processes messages from the main thread.
  */
-import init, { Database } from '@grafeo-db/wasm';
+import * as wasmModule from '@grafeo-db/wasm';
+import type { Database as DatabaseType } from '@grafeo-db/wasm';
+const { Database } = wasmModule;
+// wasm-pack --target web exposes an `__wbg_init` default export that must be
+// awaited. --target bundler auto-initializes on import and has no default.
+const wasmInit: () => Promise<unknown> =
+  (wasmModule as { default?: () => Promise<unknown> }).default
+    ?? (() => Promise.resolve());
 
 import { PersistenceManager } from './persistence';
 import type { WorkerRequest, WorkerResponse } from './types';
 
-let db: Database | null = null;
+let db: DatabaseType | null = null;
 let persistence: PersistenceManager | null = null;
 
 function assertWorkerFeature(
-  target: Database,
+  target: DatabaseType,
   methodName: string,
   featureName: string,
 ): void {
@@ -50,7 +57,7 @@ async function handleMessage(request: WorkerRequest): Promise<void> {
           db = null;
         }
 
-        await init();
+        await wasmInit();
 
         const options = args[0] as { persist?: string; persistInterval?: number } | undefined;
         if (options?.persist) {
