@@ -666,6 +666,268 @@ describe('GrafeoDB', () => {
     });
   });
 
+  describe('transactions', () => {
+    it('beginTransaction/commitTransaction round-trip', async () => {
+      expect(await db.isTransactionActive()).toBe(false);
+      await db.beginTransaction();
+      expect(await db.isTransactionActive()).toBe(true);
+      await db.commitTransaction();
+      expect(await db.isTransactionActive()).toBe(false);
+    });
+
+    it('rollbackTransaction reverts writes made during the transaction', async () => {
+      await db.execute("INSERT (:Person {name: 'Alice'})");
+      expect(await db.nodeCount()).toBe(1);
+
+      await db.beginTransaction();
+      await db.execute("INSERT (:Person {name: 'Bob'})");
+      expect(await db.nodeCount()).toBe(2);
+      await db.rollbackTransaction();
+
+      expect(await db.nodeCount()).toBe(1);
+      expect(await db.isTransactionActive()).toBe(false);
+    });
+
+    it('commitTransaction makes writes durable', async () => {
+      await db.beginTransaction();
+      await db.execute("INSERT (:Person {name: 'Alice'})");
+      await db.commitTransaction();
+
+      expect(await db.nodeCount()).toBe(1);
+      expect(await db.isTransactionActive()).toBe(false);
+    });
+
+    it('beginTransaction throws when one is already active', async () => {
+      await db.beginTransaction();
+      await expect(db.beginTransaction()).rejects.toThrow(/already active/i);
+      await db.rollbackTransaction();
+    });
+
+    it('commitTransaction/rollbackTransaction throw when none is active', async () => {
+      await expect(db.commitTransaction()).rejects.toThrow(/no active transaction/i);
+      await expect(db.rollbackTransaction()).rejects.toThrow(/no active transaction/i);
+    });
+
+    it('all transaction methods throw when database is closed', async () => {
+      const instance = await GrafeoDB.create();
+      await instance.close();
+      await expect(instance.beginTransaction()).rejects.toThrow('Database is closed');
+      await expect(instance.commitTransaction()).rejects.toThrow('Database is closed');
+      await expect(instance.rollbackTransaction()).rejects.toThrow('Database is closed');
+      await expect(instance.isTransactionActive()).rejects.toThrow('Database is closed');
+    });
+  });
+
+  describe('signed snapshots', () => {
+    const key = new Uint8Array([
+      0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08,
+      0x09, 0x0a, 0x0b, 0x0c, 0x0d, 0x0e, 0x0f, 0x10,
+    ]);
+
+    it('signedExport returns a Uint8Array prefixed with GSN1', async () => {
+      await db.execute("INSERT (:Person {name: 'Alice'})");
+      const signed = await db.signedExport(key);
+      expect(signed).toBeInstanceOf(Uint8Array);
+      expect(new TextDecoder().decode(signed.slice(0, 4))).toBe('GSN1');
+    });
+
+    it('signedExport + signedImport round-trips database state', async () => {
+      await db.execute("INSERT (:Person {name: 'Alice', age: 30})");
+      const signed = await db.signedExport(key);
+
+      const db2 = await GrafeoDB.create();
+      await db2.signedImport(signed, key);
+      const results = await db2.execute('MATCH (p:Person) RETURN p.name');
+      expect(results).toHaveLength(1);
+      expect(results[0]['p.name']).toBe('Alice');
+      await db2.close();
+    });
+
+    it('signedImport rejects payload signed with a different key', async () => {
+      await db.execute("INSERT (:Person {name: 'Alice'})");
+      const signed = await db.signedExport(key);
+
+      const wrongKey = new Uint8Array(key);
+      wrongKey[0] ^= 0xff;
+
+      const db2 = await GrafeoDB.create();
+      await expect(db2.signedImport(signed, wrongKey)).rejects.toThrow();
+      await db2.close();
+    });
+
+    it('signedImport rejects an unsigned snapshot', async () => {
+      await db.execute("INSERT (:Person {name: 'Alice'})");
+      const unsigned = await db.export();
+      const db2 = await GrafeoDB.create();
+      await expect(db2.signedImport(unsigned.data, key)).rejects.toThrow();
+      await db2.close();
+    });
+
+    it('signedExport throws when database is closed', async () => {
+      const instance = await GrafeoDB.create();
+      await instance.close();
+      await expect(instance.signedExport(key)).rejects.toThrow('Database is closed');
+    });
+
+    it('signedImport throws when database is closed', async () => {
+      const instance = await GrafeoDB.create();
+      await instance.close();
+      await expect(instance.signedImport(new Uint8Array([0]), key)).rejects.toThrow('Database is closed');
+    });
+  });
+
+  describe('transaction persistence deferral', () => {
+    interface PersistenceShape {
+      scheduleSave: (...args: unknown[]) => void;
+      cancel: () => void;
+    }
+
+    function getPersistence(instance: GrafeoDBInstance): PersistenceShape {
+      return (instance as unknown as { persistence: PersistenceShape }).persistence;
+    }
+
+    it('execute() inside a tx does not call scheduleSave', async () => {
+      const pdb = await GrafeoDB.create({ persist: 'tx-defer-execute' });
+      try {
+        const persistence = getPersistence(pdb);
+        await pdb.beginTransaction();
+        const saveSpy = vi.spyOn(persistence, 'scheduleSave');
+        await pdb.execute("INSERT (:Person {name: 'Alice'})");
+        expect(saveSpy).not.toHaveBeenCalled();
+        await pdb.rollbackTransaction();
+        saveSpy.mockRestore();
+      } finally {
+        await pdb.close();
+        const { PersistenceManager } = await import('./persistence');
+        await new PersistenceManager('tx-defer-execute').clear();
+      }
+    });
+
+    it('beginTransaction() calls cancel on the persistence manager', async () => {
+      const pdb = await GrafeoDB.create({ persist: 'tx-defer-cancel' });
+      try {
+        const persistence = getPersistence(pdb);
+        const cancelSpy = vi.spyOn(persistence, 'cancel');
+        // Pre-tx execute schedules a pending save
+        await pdb.execute("INSERT (:Person {name: 'Alice'})");
+        await pdb.beginTransaction();
+        expect(cancelSpy).toHaveBeenCalled();
+        await pdb.rollbackTransaction();
+        cancelSpy.mockRestore();
+      } finally {
+        await pdb.close();
+        const { PersistenceManager } = await import('./persistence');
+        await new PersistenceManager('tx-defer-cancel').clear();
+      }
+    });
+
+    it('commitTransaction() calls scheduleSave', async () => {
+      const pdb = await GrafeoDB.create({ persist: 'tx-defer-commit' });
+      try {
+        const persistence = getPersistence(pdb);
+        await pdb.beginTransaction();
+        const saveSpy = vi.spyOn(persistence, 'scheduleSave');
+        await pdb.commitTransaction();
+        expect(saveSpy).toHaveBeenCalled();
+        saveSpy.mockRestore();
+      } finally {
+        await pdb.close();
+        const { PersistenceManager } = await import('./persistence');
+        await new PersistenceManager('tx-defer-commit').clear();
+      }
+    });
+
+    it('rollbackTransaction() calls scheduleSave (post-rollback state must land on disk)', async () => {
+      const pdb = await GrafeoDB.create({ persist: 'tx-defer-rollback' });
+      try {
+        const persistence = getPersistence(pdb);
+        await pdb.beginTransaction();
+        const saveSpy = vi.spyOn(persistence, 'scheduleSave');
+        await pdb.rollbackTransaction();
+        expect(saveSpy).toHaveBeenCalled();
+        saveSpy.mockRestore();
+      } finally {
+        await pdb.close();
+        const { PersistenceManager } = await import('./persistence');
+        await new PersistenceManager('tx-defer-rollback').clear();
+      }
+    });
+
+    it('after commit, subsequent execute() resumes calling scheduleSave normally', async () => {
+      const pdb = await GrafeoDB.create({ persist: 'tx-defer-resume' });
+      try {
+        await pdb.beginTransaction();
+        await pdb.commitTransaction();
+        const persistence = getPersistence(pdb);
+        const saveSpy = vi.spyOn(persistence, 'scheduleSave');
+        await pdb.execute("INSERT (:Person {name: 'Alice'})");
+        expect(saveSpy).toHaveBeenCalled();
+        saveSpy.mockRestore();
+      } finally {
+        await pdb.close();
+        const { PersistenceManager } = await import('./persistence');
+        await new PersistenceManager('tx-defer-resume').clear();
+      }
+    });
+
+    it('execute() schedules save after import() during a tx (no stale flag leak)', async () => {
+      const pdb = await GrafeoDB.create({ persist: 'tx-stale-flag-import' });
+      try {
+        const persistence = getPersistence(pdb);
+        await pdb.execute("INSERT (:Person {name: 'Alice'})");
+        const snapshot = await pdb.export();
+        await pdb.beginTransaction();
+        await pdb.import(snapshot);
+        const saveSpy = vi.spyOn(persistence, 'scheduleSave');
+        await pdb.execute("INSERT (:Person {name: 'Bob'})");
+        expect(saveSpy).toHaveBeenCalled();
+        saveSpy.mockRestore();
+      } finally {
+        await pdb.close();
+        const { PersistenceManager } = await import('./persistence');
+        await new PersistenceManager('tx-stale-flag-import').clear();
+      }
+    });
+
+    it('execute() schedules save after signedImport() during a tx', async () => {
+      const pdb = await GrafeoDB.create({ persist: 'tx-stale-flag-signed' });
+      try {
+        const persistence = getPersistence(pdb);
+        const key = new Uint8Array([1, 2, 3, 4]);
+        await pdb.execute("INSERT (:Person {name: 'Alice'})");
+        const signed = await pdb.signedExport(key);
+        await pdb.beginTransaction();
+        await pdb.signedImport(signed, key);
+        const saveSpy = vi.spyOn(persistence, 'scheduleSave');
+        await pdb.execute("INSERT (:Person {name: 'Bob'})");
+        expect(saveSpy).toHaveBeenCalled();
+        saveSpy.mockRestore();
+      } finally {
+        await pdb.close();
+        const { PersistenceManager } = await import('./persistence');
+        await new PersistenceManager('tx-stale-flag-signed').clear();
+      }
+    });
+
+    it('execute() schedules save after clear() during a tx', async () => {
+      const pdb = await GrafeoDB.create({ persist: 'tx-stale-flag-clear' });
+      try {
+        const persistence = getPersistence(pdb);
+        await pdb.execute("INSERT (:Person {name: 'Alice'})");
+        await pdb.beginTransaction();
+        await pdb.clear();
+        const saveSpy = vi.spyOn(persistence, 'scheduleSave');
+        await pdb.execute("INSERT (:Person {name: 'Bob'})");
+        expect(saveSpy).toHaveBeenCalled();
+        saveSpy.mockRestore();
+      } finally {
+        await pdb.close();
+        const { PersistenceManager } = await import('./persistence');
+        await new PersistenceManager('tx-stale-flag-clear').clear();
+      }
+    });
+  });
+
   describe('persistence scheduling (isMutatingQuery removal)', () => {
     it('schedules save after INSERT', async () => {
       const pdb = await GrafeoDB.create({ persist: 'persist-insert-test' });
@@ -1022,6 +1284,99 @@ describe('GrafeoDB (worker mode)', () => {
 
     const lastCall = mockWorker.postMessage.mock.calls.at(-1)![0];
     expect(lastCall.method).toBe('listProjections');
+
+    const closePromise = wdb.close();
+    respondToLast(undefined);
+    await closePromise;
+  });
+
+  it('delegates beginTransaction through proxy', async () => {
+    const wdb = await createWorkerDb();
+    const promise = wdb.beginTransaction();
+    respondToLast(undefined);
+    await promise;
+
+    const lastCall = mockWorker.postMessage.mock.calls.at(-1)![0];
+    expect(lastCall.method).toBe('beginTransaction');
+
+    const closePromise = wdb.close();
+    respondToLast(undefined);
+    await closePromise;
+  });
+
+  it('delegates commitTransaction through proxy', async () => {
+    const wdb = await createWorkerDb();
+    const promise = wdb.commitTransaction();
+    respondToLast(undefined);
+    await promise;
+
+    const lastCall = mockWorker.postMessage.mock.calls.at(-1)![0];
+    expect(lastCall.method).toBe('commitTransaction');
+
+    const closePromise = wdb.close();
+    respondToLast(undefined);
+    await closePromise;
+  });
+
+  it('delegates rollbackTransaction through proxy', async () => {
+    const wdb = await createWorkerDb();
+    const promise = wdb.rollbackTransaction();
+    respondToLast(undefined);
+    await promise;
+
+    const lastCall = mockWorker.postMessage.mock.calls.at(-1)![0];
+    expect(lastCall.method).toBe('rollbackTransaction');
+
+    const closePromise = wdb.close();
+    respondToLast(undefined);
+    await closePromise;
+  });
+
+  it('delegates isTransactionActive through proxy', async () => {
+    const wdb = await createWorkerDb();
+    const promise = wdb.isTransactionActive();
+    respondToLast(true);
+    const result = await promise;
+    expect(result).toBe(true);
+
+    const lastCall = mockWorker.postMessage.mock.calls.at(-1)![0];
+    expect(lastCall.method).toBe('isTransactionActive');
+
+    const closePromise = wdb.close();
+    respondToLast(undefined);
+    await closePromise;
+  });
+
+  it('delegates signedExport through proxy', async () => {
+    const wdb = await createWorkerDb();
+    const key = new Uint8Array([1, 2, 3, 4]);
+    const mockSigned = new Uint8Array([0x47, 0x53, 0x4e, 0x31, 0x00]);
+    const promise = wdb.signedExport(key);
+    respondToLast(mockSigned);
+    const result = await promise;
+    expect(result).toEqual(mockSigned);
+
+    const lastCall = mockWorker.postMessage.mock.calls.at(-1)![0];
+    expect(lastCall.method).toBe('signedExport');
+    expect(lastCall.args[0]).toEqual(key);
+
+    const closePromise = wdb.close();
+    respondToLast(undefined);
+    await closePromise;
+  });
+
+  it('delegates signedImport through proxy', async () => {
+    const wdb = await createWorkerDb();
+    const key = new Uint8Array([1, 2, 3, 4]);
+    const signed = new Uint8Array([0x47, 0x53, 0x4e, 0x31, 0x00]);
+    const promise = wdb.signedImport(signed, key);
+    respondToLast(undefined);
+    await promise;
+
+    const lastCall = mockWorker.postMessage.mock.calls.at(-1)![0];
+    expect(lastCall.method).toBe('signedImport');
+    expect(lastCall.args[0]).toEqual(signed);
+    expect(lastCall.args[1]).toEqual(key);
 
     const closePromise = wdb.close();
     respondToLast(undefined);

@@ -2,7 +2,7 @@
  * Mock for @grafeo-db/wasm used in tests.
  *
  * Simulates a basic in-memory graph database with INSERT/MATCH support.
- * Matches the WASM 0.5.36 API surface.
+ * Matches the WASM 0.5.42 API surface.
  */
 
 interface Node {
@@ -23,6 +23,8 @@ export class Database {
   private freed = false;
   private schemaName: string | undefined = undefined;
   private projections = new Map<string, { nodeLabels?: string[]; edgeTypes?: string[] }>();
+  private inTransaction = false;
+  private txSnapshot: { nodes: Node[]; edges: Edge[] } | undefined = undefined;
 
   constructor() {
     // no-op
@@ -299,13 +301,13 @@ export class Database {
       is_persistent: false,
       path: null,
       wal_enabled: false,
-      version: '0.5.36-mock',
+      version: '0.5.42-mock',
       features: ['gql'],
     };
   }
 
   static version(): string {
-    return '0.5.36-mock';
+    return '0.5.42-mock';
   }
 
   exportSnapshot(): Uint8Array {
@@ -316,13 +318,110 @@ export class Database {
     return new TextEncoder().encode(data);
   }
 
+  exportSnapshotSigned(key: Uint8Array): Uint8Array {
+    this.assertNotFreed();
+    if (key.length === 0) {
+      throw new Error('exportSnapshotSigned: key must not be empty');
+    }
+    // Mock does not perform real HMAC: prefixes with GSN1 and appends the
+    // key bytes as a placeholder tag. Real integrity checking lives in the
+    // WASM crate's signed_snapshot module.
+    const payload = this.exportSnapshot();
+    const header = new TextEncoder().encode('GSN1');
+    const out = new Uint8Array(header.length + payload.length + 32);
+    out.set(header, 0);
+    out.set(payload, header.length);
+    // Placeholder "tag" so tests can exercise the importSnapshotSigned branch.
+    for (let i = 0; i < 32; i++) {
+      out[out.length - 32 + i] = key[i % key.length]!;
+    }
+    return out;
+  }
+
   static importSnapshot(data: Uint8Array): Database {
+    const header = new TextDecoder().decode(data.slice(0, 4));
+    if (header === 'GSN1') {
+      throw new Error(
+        'importSnapshot: this snapshot was produced by exportSnapshotSigned. ' +
+          'Use importSnapshotSigned(data, key) to verify and restore it.',
+      );
+    }
     const json = new TextDecoder().decode(data);
     const parsed = JSON.parse(json) as { nodes: Node[]; edges: Edge[] };
     const db = new Database();
     db.nodes = parsed.nodes;
     db.edges = parsed.edges;
     return db;
+  }
+
+  static importSnapshotSigned(data: Uint8Array, key: Uint8Array): Database {
+    if (key.length === 0) {
+      throw new Error('importSnapshotSigned: key must not be empty');
+    }
+    if (data.length < 36) {
+      throw new Error('importSnapshotSigned: snapshot too small');
+    }
+    const header = new TextDecoder().decode(data.slice(0, 4));
+    if (header !== 'GSN1') {
+      throw new Error(
+        'importSnapshotSigned: missing GSN1 header; use importSnapshot for unsigned data',
+      );
+    }
+    // Verify placeholder tag matches wrap() logic.
+    const tag = data.slice(data.length - 32);
+    for (let i = 0; i < 32; i++) {
+      if (tag[i] !== key[i % key.length]) {
+        throw new Error('importSnapshotSigned: HMAC verification failed');
+      }
+    }
+    const payload = data.slice(4, data.length - 32);
+    return Database.importSnapshot(payload);
+  }
+
+  beginTransaction(): void {
+    this.assertNotFreed();
+    if (this.inTransaction) {
+      throw new Error('Transaction already active');
+    }
+    this.inTransaction = true;
+    this.txSnapshot = {
+      nodes: this.nodes.map((n) => ({ ...n })),
+      edges: this.edges.map((e) => ({ ...e })),
+    };
+  }
+
+  commitTransaction(): void {
+    this.assertNotFreed();
+    if (!this.inTransaction) {
+      throw new Error('No active transaction to commit');
+    }
+    this.inTransaction = false;
+    this.txSnapshot = undefined;
+  }
+
+  rollbackTransaction(): void {
+    this.assertNotFreed();
+    if (!this.inTransaction) {
+      throw new Error('No active transaction to roll back');
+    }
+    if (this.txSnapshot) {
+      this.nodes = this.txSnapshot.nodes;
+      this.edges = this.txSnapshot.edges;
+    }
+    this.inTransaction = false;
+    this.txSnapshot = undefined;
+  }
+
+  isTransactionActive(): boolean {
+    return !this.freed && this.inTransaction;
+  }
+
+  close(): void {
+    if (this.freed) return;
+    if (this.inTransaction) {
+      this.rollbackTransaction();
+    }
+    this.freed = true;
   }
 
   free(): void {

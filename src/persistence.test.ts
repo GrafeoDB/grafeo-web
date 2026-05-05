@@ -73,6 +73,28 @@ describe('PersistenceManager', () => {
     });
   });
 
+  describe('cancel()', () => {
+    it('clears the pending timer without disposing', async () => {
+      vi.useFakeTimers();
+
+      const getSnapshot = vi.fn(() => new Uint8Array([1, 2, 3]));
+
+      pm.scheduleSave(getSnapshot);
+      pm.cancel();
+
+      // Advance timers past debounce interval; no save should have fired.
+      await vi.advanceTimersByTimeAsync(1100);
+      expect(getSnapshot).not.toHaveBeenCalled();
+
+      // After cancel, scheduleSave should still work normally (not disposed).
+      pm.scheduleSave(getSnapshot);
+      await vi.advanceTimersByTimeAsync(1100);
+      expect(getSnapshot).toHaveBeenCalledTimes(1);
+
+      vi.useRealTimers();
+    });
+  });
+
   describe('flush()', () => {
     it('saves immediately when dirty', async () => {
       const data = new Uint8Array([7, 8, 9]);

@@ -103,7 +103,7 @@ export class GrafeoDB {
       ? this.wasm!.executeWithParams(query, params)
       : this.wasm!.execute(query);
 
-    if (this.persistence) {
+    if (this.persistence && !this.wasm!.isTransactionActive()) {
       this.persistence.scheduleSave(() => this.wasm!.exportSnapshot());
     }
 
@@ -115,7 +115,7 @@ export class GrafeoDB {
     this.assertOpen();
     const result = this.wasm!.executeRaw(query);
 
-    if (this.persistence) {
+    if (this.persistence && !this.wasm!.isTransactionActive()) {
       this.persistence.scheduleSave(() => this.wasm!.exportSnapshot());
     }
 
@@ -155,7 +155,7 @@ export class GrafeoDB {
   ): Promise<boolean> {
     this.assertOpen();
     const created = this.wasm!.createProjection(name, nodeLabels, edgeTypes);
-    if (this.persistence) {
+    if (this.persistence && !this.wasm!.isTransactionActive()) {
       this.persistence.scheduleSave(() => this.wasm!.exportSnapshot());
     }
     return created;
@@ -169,7 +169,7 @@ export class GrafeoDB {
   async dropProjection(name: string): Promise<boolean> {
     this.assertOpen();
     const existed = this.wasm!.dropProjection(name);
-    if (this.persistence) {
+    if (this.persistence && !this.wasm!.isTransactionActive()) {
       this.persistence.scheduleSave(() => this.wasm!.exportSnapshot());
     }
     return existed;
@@ -233,7 +233,7 @@ export class GrafeoDB {
     const newWasm = WasmDatabase.importSnapshot(snapshot.data);
     this.wasm!.free();
     this.wasm = newWasm;
-    if (this.persistence) {
+    if (this.persistence && !this.wasm!.isTransactionActive()) {
       this.persistence.scheduleSave(() => this.wasm!.exportSnapshot());
     }
   }
@@ -256,6 +256,70 @@ export class GrafeoDB {
   async changesSince(_timestamp: number): Promise<Change[]> {
     this.assertOpen();
     throw new Error('changesSince() is not yet implemented: the WASM engine does not expose change tracking');
+  }
+
+  /**
+   * Begins a new transaction. Subsequent `execute*` calls see each other's
+   * uncommitted writes until `commitTransaction()` or `rollbackTransaction()`.
+   */
+  async beginTransaction(): Promise<void> {
+    this.assertOpen();
+    // Cancel any pending pre-tx save so its timer cannot fire mid-tx and
+    // capture uncommitted state via exportSnapshot() at fire time.
+    this.persistence?.cancel();
+    this.wasm!.beginTransaction();
+  }
+
+  /** Commits the active transaction. Persists writes if the database is persistent. */
+  async commitTransaction(): Promise<void> {
+    this.assertOpen();
+    this.wasm!.commitTransaction();
+    if (this.persistence) {
+      this.persistence.scheduleSave(() => this.wasm!.exportSnapshot());
+    }
+  }
+
+  /** Rolls back the active transaction, discarding pending writes. */
+  async rollbackTransaction(): Promise<void> {
+    this.assertOpen();
+    this.wasm!.rollbackTransaction();
+    // After rollback the in-memory state == pre-tx state, so a single
+    // post-rollback scheduleSave is sufficient: it persists the rolled-back
+    // state, which equals pre-tx state.
+    if (this.persistence) {
+      this.persistence.scheduleSave(() => this.wasm!.exportSnapshot());
+    }
+  }
+
+  /** Returns true while a transaction is active. */
+  async isTransactionActive(): Promise<boolean> {
+    this.assertOpen();
+    return this.wasm!.isTransactionActive();
+  }
+
+  /**
+   * Exports a tamper-evident snapshot: prefixed with a `GSN1` magic header
+   * and an HMAC-SHA256 tag computed with `key`. Restore with `signedImport()`
+   * using the same `key`.
+   */
+  async signedExport(key: Uint8Array): Promise<Uint8Array> {
+    this.assertOpen();
+    return this.wasm!.exportSnapshotSigned(key);
+  }
+
+  /**
+   * Restores from a signed snapshot produced by `signedExport()`. Verifies
+   * the HMAC tag in constant time; throws if the data is truncated, signed
+   * with a different key, or missing the `GSN1` header.
+   */
+  async signedImport(data: Uint8Array, key: Uint8Array): Promise<void> {
+    this.assertOpen();
+    const newWasm = WasmDatabase.importSnapshotSigned(data, key);
+    this.wasm!.free();
+    this.wasm = newWasm;
+    if (this.persistence && !this.wasm!.isTransactionActive()) {
+      this.persistence.scheduleSave(() => this.wasm!.exportSnapshot());
+    }
   }
 
   /** Releases WASM memory and closes any open resources. */

@@ -115,6 +115,18 @@ export class PersistenceManager {
     }, this.interval);
   }
 
+  /**
+   * Cancel the pending debounce timer (if any) without disposing.
+   * Subsequent `scheduleSave` calls work normally. Keeps `dirty=true`
+   * so a follow-up `scheduleSave` continues to honor pre-cancel state.
+   */
+  cancel(): void {
+    if (this.timer !== null) {
+      clearTimeout(this.timer);
+      this.timer = null;
+    }
+  }
+
   /** Flush any pending save immediately and mark as disposed. */
   async flush(getSnapshot: () => Uint8Array): Promise<void> {
     if (this.timer !== null) {

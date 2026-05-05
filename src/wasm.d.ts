@@ -1,7 +1,7 @@
 /**
  * Type declarations for @grafeo-db/wasm and @grafeo-db/wasm-lite.
  *
- * These mirror the wasm-bindgen generated types from the WASM crate (v0.5.38).
+ * These mirror the wasm-bindgen generated types from the WASM crate (v0.5.42).
  * Both variants expose the same API surface; the lite variant simply omits
  * multi-language and AI search features at the WASM level.
  *
@@ -214,8 +214,50 @@ declare module '@grafeo-db/wasm' {
     /** Export full database state as serialized bytes. */
     exportSnapshot(): Uint8Array;
 
-    /** Creates a database from a binary snapshot. */
+    /**
+     * Export as a tamper-evident snapshot: prefixed with a `GSN1` magic header
+     * and appended with an HMAC-SHA256 tag. Use `importSnapshotSigned(data, key)`
+     * with the same `key` to verify integrity before restoring.
+     *
+     * Recommended when snapshots are stored in locations the user cannot fully
+     * trust (IndexedDB, server-side storage, shared URLs).
+     */
+    exportSnapshotSigned(key: Uint8Array): Uint8Array;
+
+    /** Creates a database from an unsigned binary snapshot. */
     static importSnapshot(data: Uint8Array): Database;
+
+    /**
+     * Creates a database from a signed snapshot produced by
+     * `exportSnapshotSigned()`. Verifies the HMAC tag in constant time; throws
+     * if the data is truncated, signed with a different key, or missing the
+     * `GSN1` header.
+     */
+    static importSnapshotSigned(data: Uint8Array, key: Uint8Array): Database;
+
+    /**
+     * Begins a new transaction. Subsequent `execute*` calls see each other's
+     * uncommitted writes until `commitTransaction()` or `rollbackTransaction()`.
+     * Only one transaction may be active at a time.
+     */
+    beginTransaction(): void;
+
+    /** Commits the active transaction. */
+    commitTransaction(): void;
+
+    /** Rolls back the active transaction, discarding pending writes. */
+    rollbackTransaction(): void;
+
+    /** Returns `true` while a transaction is active. */
+    isTransactionActive(): boolean;
+
+    /**
+     * Closes the database: rolls back any active transaction, clears the plan
+     * cache, and blocks subsequent operations. Calling `close()` more than once
+     * is a no-op. Because WASM data lives in memory, call `exportSnapshot()`
+     * first if you need persistence.
+     */
+    close(): void;
 
     /** Frees the database from WASM memory. */
     free(): void;
@@ -277,7 +319,14 @@ declare module '@grafeo-db/wasm-lite' {
     info(): object;
     static version(): string;
     exportSnapshot(): Uint8Array;
+    exportSnapshotSigned(key: Uint8Array): Uint8Array;
     static importSnapshot(data: Uint8Array): Database;
+    static importSnapshotSigned(data: Uint8Array, key: Uint8Array): Database;
+    beginTransaction(): void;
+    commitTransaction(): void;
+    rollbackTransaction(): void;
+    isTransactionActive(): boolean;
+    close(): void;
     free(): void;
     [Symbol.dispose](): void;
   }
