@@ -776,6 +776,101 @@ describe('GrafeoDB', () => {
     });
   });
 
+  describe('transaction persistence deferral', () => {
+    interface PersistenceShape {
+      scheduleSave: (...args: unknown[]) => void;
+      cancel: () => void;
+    }
+
+    function getPersistence(instance: GrafeoDBInstance): PersistenceShape {
+      return (instance as unknown as { persistence: PersistenceShape }).persistence;
+    }
+
+    it('execute() inside a tx does not call scheduleSave', async () => {
+      const pdb = await GrafeoDB.create({ persist: 'tx-defer-execute' });
+      try {
+        const persistence = getPersistence(pdb);
+        await pdb.beginTransaction();
+        const saveSpy = vi.spyOn(persistence, 'scheduleSave');
+        await pdb.execute("INSERT (:Person {name: 'Alice'})");
+        expect(saveSpy).not.toHaveBeenCalled();
+        await pdb.rollbackTransaction();
+        saveSpy.mockRestore();
+      } finally {
+        await pdb.close();
+        const { PersistenceManager } = await import('./persistence');
+        await new PersistenceManager('tx-defer-execute').clear();
+      }
+    });
+
+    it('beginTransaction() calls cancel on the persistence manager', async () => {
+      const pdb = await GrafeoDB.create({ persist: 'tx-defer-cancel' });
+      try {
+        const persistence = getPersistence(pdb);
+        const cancelSpy = vi.spyOn(persistence, 'cancel');
+        // Pre-tx execute schedules a pending save
+        await pdb.execute("INSERT (:Person {name: 'Alice'})");
+        await pdb.beginTransaction();
+        expect(cancelSpy).toHaveBeenCalled();
+        await pdb.rollbackTransaction();
+        cancelSpy.mockRestore();
+      } finally {
+        await pdb.close();
+        const { PersistenceManager } = await import('./persistence');
+        await new PersistenceManager('tx-defer-cancel').clear();
+      }
+    });
+
+    it('commitTransaction() calls scheduleSave', async () => {
+      const pdb = await GrafeoDB.create({ persist: 'tx-defer-commit' });
+      try {
+        const persistence = getPersistence(pdb);
+        await pdb.beginTransaction();
+        const saveSpy = vi.spyOn(persistence, 'scheduleSave');
+        await pdb.commitTransaction();
+        expect(saveSpy).toHaveBeenCalled();
+        saveSpy.mockRestore();
+      } finally {
+        await pdb.close();
+        const { PersistenceManager } = await import('./persistence');
+        await new PersistenceManager('tx-defer-commit').clear();
+      }
+    });
+
+    it('rollbackTransaction() calls scheduleSave (post-rollback state must land on disk)', async () => {
+      const pdb = await GrafeoDB.create({ persist: 'tx-defer-rollback' });
+      try {
+        const persistence = getPersistence(pdb);
+        await pdb.beginTransaction();
+        const saveSpy = vi.spyOn(persistence, 'scheduleSave');
+        await pdb.rollbackTransaction();
+        expect(saveSpy).toHaveBeenCalled();
+        saveSpy.mockRestore();
+      } finally {
+        await pdb.close();
+        const { PersistenceManager } = await import('./persistence');
+        await new PersistenceManager('tx-defer-rollback').clear();
+      }
+    });
+
+    it('after commit, subsequent execute() resumes calling scheduleSave normally', async () => {
+      const pdb = await GrafeoDB.create({ persist: 'tx-defer-resume' });
+      try {
+        await pdb.beginTransaction();
+        await pdb.commitTransaction();
+        const persistence = getPersistence(pdb);
+        const saveSpy = vi.spyOn(persistence, 'scheduleSave');
+        await pdb.execute("INSERT (:Person {name: 'Alice'})");
+        expect(saveSpy).toHaveBeenCalled();
+        saveSpy.mockRestore();
+      } finally {
+        await pdb.close();
+        const { PersistenceManager } = await import('./persistence');
+        await new PersistenceManager('tx-defer-resume').clear();
+      }
+    });
+  });
+
   describe('persistence scheduling (isMutatingQuery removal)', () => {
     it('schedules save after INSERT', async () => {
       const pdb = await GrafeoDB.create({ persist: 'persist-insert-test' });

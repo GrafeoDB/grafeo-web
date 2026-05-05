@@ -333,6 +333,152 @@ describe('Worker message handler', () => {
     });
   });
 
+  describe('transactions', () => {
+    it('beginTransaction succeeds', async () => {
+      const res = await send('beginTransaction', [], 200);
+      expect(res.error).toBeUndefined();
+      await send('rollbackTransaction', [], 201);
+    });
+
+    it('isTransactionActive flips with begin/commit', async () => {
+      let res = await send('isTransactionActive', [], 210);
+      expect(res.result).toBe(false);
+      await send('beginTransaction', [], 211);
+      res = await send('isTransactionActive', [], 212);
+      expect(res.result).toBe(true);
+      await send('commitTransaction', [], 213);
+      res = await send('isTransactionActive', [], 214);
+      expect(res.result).toBe(false);
+    });
+
+    it('rollback reverts mid-tx writes', async () => {
+      await send('execute', ["INSERT (:Person {name: 'Alice'})"], 220);
+      await send('beginTransaction', [], 221);
+      await send('execute', ["INSERT (:Person {name: 'Bob'})"], 222);
+      let countRes = await send('nodeCount', [], 223);
+      expect(countRes.result).toBe(2);
+      await send('rollbackTransaction', [], 224);
+      countRes = await send('nodeCount', [], 225);
+      expect(countRes.result).toBe(1);
+    });
+
+    it('commit makes writes durable', async () => {
+      await send('beginTransaction', [], 230);
+      await send('execute', ["INSERT (:Person {name: 'Alice'})"], 231);
+      await send('commitTransaction', [], 232);
+      const res = await send('nodeCount', [], 233);
+      expect(res.result).toBe(1);
+    });
+
+    it('commit with persistence schedules save', async () => {
+      await send('init', [{ persist: 'worker-tx-commit-persist' }], 240);
+      await send('beginTransaction', [], 241);
+      await send('execute', ["INSERT (:Person {name: 'Alice'})"], 242);
+      const res = await send('commitTransaction', [], 243);
+      expect(res.error).toBeUndefined();
+      await send('close', [], 244);
+    });
+
+    it('rollback with persistence schedules save (post-rollback state must land on disk)', async () => {
+      await send('init', [{ persist: 'worker-tx-rollback-persist' }], 250);
+      await send('beginTransaction', [], 251);
+      await send('execute', ["INSERT (:Person {name: 'Bob'})"], 252);
+      const res = await send('rollbackTransaction', [], 253);
+      expect(res.error).toBeUndefined();
+      await send('close', [], 254);
+    });
+
+    it('begin cancels pending pre-tx save (no mid-tx persistence)', async () => {
+      // Init with very short interval so the debounce would fire mid-tx if not cancelled
+      await send('init', [{ persist: 'worker-tx-cancel-test', persistInterval: 10 }], 260);
+      await send('execute', ["INSERT (:Person {name: 'Alice'})"], 261);
+      // beginTransaction should call persistence.cancel() so the queued timer dies
+      const beginRes = await send('beginTransaction', [], 262);
+      expect(beginRes.error).toBeUndefined();
+      // Insert mid-tx, then rollback. If begin didn't cancel, the queued debounce
+      // would have captured mid-tx state via exportSnapshot() at fire time.
+      await send('execute', ["INSERT (:Person {name: 'Bob'})"], 263);
+      // Wait long enough for any uncancelled timer to fire
+      await new Promise((resolve) => setTimeout(resolve, 30));
+      await send('rollbackTransaction', [], 264);
+      await send('close', [], 265);
+
+      // Re-init from persisted state and verify only Alice persisted
+      await send('init', [{ persist: 'worker-tx-cancel-test' }], 266);
+      const countRes = await send('nodeCount', [], 267);
+      expect(countRes.result).toBe(1);
+      await send('close', [], 268);
+    });
+
+    it('returns error when db not initialized', async () => {
+      await send('close', [], 270);
+      const res = await send('beginTransaction', [], 271);
+      expect(res.error).toBe('Database not initialized');
+      const res2 = await send('commitTransaction', [], 272);
+      expect(res2.error).toBe('Database not initialized');
+      const res3 = await send('rollbackTransaction', [], 273);
+      expect(res3.error).toBe('Database not initialized');
+      const res4 = await send('isTransactionActive', [], 274);
+      expect(res4.error).toBe('Database not initialized');
+    });
+  });
+
+  describe('signed snapshots', () => {
+    const key = new Uint8Array([1, 2, 3, 4, 5, 6, 7, 8]);
+
+    it('signedExport returns Uint8Array prefixed with GSN1', async () => {
+      await send('execute', ["INSERT (:Person {name: 'Alice'})"], 300);
+      const res = await send('signedExport', [key], 301);
+      expect(res.error).toBeUndefined();
+      const signed = res.result as Uint8Array;
+      expect(signed).toBeInstanceOf(Uint8Array);
+      expect(new TextDecoder().decode(signed.slice(0, 4))).toBe('GSN1');
+    });
+
+    it('signedExport + signedImport round-trips', async () => {
+      await send('execute', ["INSERT (:Person {name: 'Alice'})"], 310);
+      const expRes = await send('signedExport', [key], 311);
+      const signed = expRes.result as Uint8Array;
+
+      await send('clear', [], 312);
+      const importRes = await send('signedImport', [signed, key], 313);
+      expect(importRes.error).toBeUndefined();
+
+      const countRes = await send('nodeCount', [], 314);
+      expect(countRes.result).toBe(1);
+    });
+
+    it('signedImport fails on wrong key', async () => {
+      await send('execute', ["INSERT (:Person {name: 'Alice'})"], 320);
+      const expRes = await send('signedExport', [key], 321);
+      const signed = expRes.result as Uint8Array;
+
+      const wrongKey = new Uint8Array(key);
+      wrongKey[0] ^= 0xff;
+      const res = await send('signedImport', [signed, wrongKey], 322);
+      expect(res.error).toBeDefined();
+    });
+
+    it('signedImport with persistence schedules save', async () => {
+      await send('init', [{ persist: 'worker-signed-persist' }], 330);
+      await send('execute', ["INSERT (:Person {name: 'Alice'})"], 331);
+      const expRes = await send('signedExport', [key], 332);
+      const signed = expRes.result as Uint8Array;
+      await send('clear', [], 333);
+      const importRes = await send('signedImport', [signed, key], 334);
+      expect(importRes.error).toBeUndefined();
+      await send('close', [], 335);
+    });
+
+    it('returns error when db not initialized', async () => {
+      await send('close', [], 340);
+      const res = await send('signedExport', [key], 341);
+      expect(res.error).toBe('Database not initialized');
+      const res2 = await send('signedImport', [new Uint8Array([0]), key], 342);
+      expect(res2.error).toBe('Database not initialized');
+    });
+  });
+
   describe('error handling', () => {
     it('returns error for unknown method', async () => {
       const res = await send('nonexistent', [], 99);

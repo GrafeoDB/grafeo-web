@@ -307,7 +307,7 @@ export class Database {
   }
 
   static version(): string {
-    return '0.5.36-mock';
+    return '0.5.42-mock';
   }
 
   exportSnapshot(): Uint8Array {
