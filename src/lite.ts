@@ -258,6 +258,61 @@ export class GrafeoDB {
     throw new Error('changesSince() is not yet implemented: the WASM engine does not expose change tracking');
   }
 
+  /**
+   * Begins a new transaction. Subsequent `execute*` calls see each other's
+   * uncommitted writes until `commitTransaction()` or `rollbackTransaction()`.
+   */
+  async beginTransaction(): Promise<void> {
+    this.assertOpen();
+    this.wasm!.beginTransaction();
+  }
+
+  /** Commits the active transaction. Persists writes if the database is persistent. */
+  async commitTransaction(): Promise<void> {
+    this.assertOpen();
+    this.wasm!.commitTransaction();
+    if (this.persistence) {
+      this.persistence.scheduleSave(() => this.wasm!.exportSnapshot());
+    }
+  }
+
+  /** Rolls back the active transaction, discarding pending writes. */
+  async rollbackTransaction(): Promise<void> {
+    this.assertOpen();
+    this.wasm!.rollbackTransaction();
+  }
+
+  /** Returns true while a transaction is active. */
+  async isTransactionActive(): Promise<boolean> {
+    this.assertOpen();
+    return this.wasm!.isTransactionActive();
+  }
+
+  /**
+   * Exports a tamper-evident snapshot: prefixed with a `GSN1` magic header
+   * and an HMAC-SHA256 tag computed with `key`. Restore with `signedImport()`
+   * using the same `key`.
+   */
+  async signedExport(key: Uint8Array): Promise<Uint8Array> {
+    this.assertOpen();
+    return this.wasm!.exportSnapshotSigned(key);
+  }
+
+  /**
+   * Restores from a signed snapshot produced by `signedExport()`. Verifies
+   * the HMAC tag in constant time; throws if the data is truncated, signed
+   * with a different key, or missing the `GSN1` header.
+   */
+  async signedImport(data: Uint8Array, key: Uint8Array): Promise<void> {
+    this.assertOpen();
+    const newWasm = WasmDatabase.importSnapshotSigned(data, key);
+    this.wasm!.free();
+    this.wasm = newWasm;
+    if (this.persistence) {
+      this.persistence.scheduleSave(() => this.wasm!.exportSnapshot());
+    }
+  }
+
   /** Releases WASM memory and closes any open resources. */
   async close(): Promise<void> {
     if (this.closed) return;

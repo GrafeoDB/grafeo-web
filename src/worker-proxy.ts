@@ -270,6 +270,30 @@ export class WorkerProxy {
     return (await this.send('importRdf', [data])) as RdfImportResult;
   }
 
+  async beginTransaction(): Promise<void> {
+    await this.send('beginTransaction');
+  }
+
+  async commitTransaction(): Promise<void> {
+    await this.send('commitTransaction');
+  }
+
+  async rollbackTransaction(): Promise<void> {
+    await this.send('rollbackTransaction');
+  }
+
+  async isTransactionActive(): Promise<boolean> {
+    return (await this.send('isTransactionActive')) as boolean;
+  }
+
+  async signedExport(key: Uint8Array): Promise<Uint8Array> {
+    return (await this.send('signedExport', [key])) as Uint8Array;
+  }
+
+  async signedImport(data: Uint8Array, key: Uint8Array): Promise<void> {
+    await this.send('signedImport', [data, key]);
+  }
+
   async close(): Promise<void> {
     await this.send('close');
     this.worker?.terminate();

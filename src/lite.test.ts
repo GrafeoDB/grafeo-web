@@ -273,6 +273,78 @@ describe('GrafeoDB (lite)', () => {
     });
   });
 
+  describe('transactions', () => {
+    it('beginTransaction/commitTransaction round-trip', async () => {
+      expect(await db.isTransactionActive()).toBe(false);
+      await db.beginTransaction();
+      expect(await db.isTransactionActive()).toBe(true);
+      await db.commitTransaction();
+      expect(await db.isTransactionActive()).toBe(false);
+    });
+
+    it('rollbackTransaction reverts writes made during the transaction', async () => {
+      await db.execute("INSERT (:Person {name: 'Alice'})");
+      expect(await db.nodeCount()).toBe(1);
+
+      await db.beginTransaction();
+      await db.execute("INSERT (:Person {name: 'Bob'})");
+      expect(await db.nodeCount()).toBe(2);
+      await db.rollbackTransaction();
+
+      expect(await db.nodeCount()).toBe(1);
+    });
+
+    it('throws when database is closed', async () => {
+      const instance = await GrafeoDB.create();
+      await instance.close();
+      await expect(instance.beginTransaction()).rejects.toThrow('Database is closed');
+      await expect(instance.commitTransaction()).rejects.toThrow('Database is closed');
+      await expect(instance.rollbackTransaction()).rejects.toThrow('Database is closed');
+      await expect(instance.isTransactionActive()).rejects.toThrow('Database is closed');
+    });
+  });
+
+  describe('signed snapshots', () => {
+    const key = new Uint8Array([1, 2, 3, 4, 5, 6, 7, 8]);
+
+    it('signedExport returns a Uint8Array prefixed with GSN1', async () => {
+      await db.execute("INSERT (:Person {name: 'Alice'})");
+      const signed = await db.signedExport(key);
+      expect(signed).toBeInstanceOf(Uint8Array);
+      expect(new TextDecoder().decode(signed.slice(0, 4))).toBe('GSN1');
+    });
+
+    it('signedExport + signedImport round-trips state', async () => {
+      await db.execute("INSERT (:Person {name: 'Alice'})");
+      const signed = await db.signedExport(key);
+
+      const db2 = await GrafeoDB.create();
+      await db2.signedImport(signed, key);
+      const results = await db2.execute('MATCH (p:Person) RETURN p.name');
+      expect(results).toHaveLength(1);
+      expect(results[0]['p.name']).toBe('Alice');
+      await db2.close();
+    });
+
+    it('signedImport rejects payload signed with a different key', async () => {
+      await db.execute("INSERT (:Person {name: 'Alice'})");
+      const signed = await db.signedExport(key);
+      const wrongKey = new Uint8Array(key);
+      wrongKey[0] ^= 0xff;
+
+      const db2 = await GrafeoDB.create();
+      await expect(db2.signedImport(signed, wrongKey)).rejects.toThrow();
+      await db2.close();
+    });
+
+    it('throws when database is closed', async () => {
+      const instance = await GrafeoDB.create();
+      await instance.close();
+      await expect(instance.signedExport(key)).rejects.toThrow('Database is closed');
+      await expect(instance.signedImport(new Uint8Array([0]), key)).rejects.toThrow('Database is closed');
+    });
+  });
+
   describe('close()', () => {
     it('is idempotent', async () => {
       const instance = await GrafeoDB.create();

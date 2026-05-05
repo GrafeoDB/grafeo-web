@@ -2,6 +2,42 @@
 
 All notable changes to `@grafeo-db/web`.
 
+## [0.5.42] - 2026-05-05
+
+Catches up on Grafeo Core 0.5.41 + 0.5.42. Two new wrapper APIs (explicit transactions and HMAC-signed snapshots) plus a basket of transparent engine improvements: streaming top-K, IN-list index fast path, paged HNSW topology, packed RDF Ring, wasm32 simd128 distance kernels.
+
+### Added
+
+- **Explicit transactions on `GrafeoDB`**: `beginTransaction()`, `commitTransaction()`, `rollbackTransaction()`, `isTransactionActive()`. Subsequent `execute*` calls within a transaction see each other's uncommitted writes; `commitTransaction()` schedules persistence, `rollbackTransaction()` discards pending writes. Mirrored on the lite build and routed through the worker proxy. Surfaced from Grafeo Core 0.5.41.
+- **Tamper-evident snapshots on `GrafeoDB`**: `signedExport(key)` and `signedImport(data, key)`. The export is prefixed with a `GSN1` magic header and an HMAC-SHA256 tag computed over magic + payload; `signedImport()` verifies the tag in constant time and refuses unsigned payloads, payloads signed with a different key, and truncated input. Recommended whenever snapshots travel through locations the user cannot fully trust (IndexedDB, server storage, shared URLs). Mirrored on the lite build and routed through the worker proxy. Surfaced from Grafeo Core 0.5.41.
+
+### Changed
+
+- **`@grafeo-db/wasm`**: updated to 0.5.42
+- **`@grafeo-db/wasm-lite`**: updated to 0.5.42
+
+### Engine highlights (via Grafeo Core 0.5.41)
+
+- **`CALL grafeo.search.*` procedures**: text and vector search reachable as procedure calls from any query language, with scalar similarity available as a projection expression
+- **wasm32 simd128 HNSW distance kernels**: 4.36x to 5.35x speedup on 384-dim f32 vectors (dot product, squared Euclidean, cosine, Manhattan). Enabled by default for wasm32 builds; runtime requires Chrome 91+, Firefox 89+, Safari 16.4+
+- **RDF and CDC memory breakdown** in `memoryUsage()`: gained `rdf` (triple count, term dictionary, optional Ring index, named-graph count) and `cdc` (entity count, event count) blocks alongside the existing store/index/MVCC/cache totals (feature-gated, omitted from JSON when empty)
+- **Compact-store correctness sweep**: post-`compact()` writes now visible to `MATCH`; signed Int64 columns no longer stringified after `compact()` (new `RawI64` codec); `LayeredStore` get/property/visibility methods fall through to the overlay; named graphs carry across `compact()` / `recompact()`
+- **VectorScan bounded `k`**: unbounded k no longer degrades HNSW to full traversal
+- **Cypher CASE WHEN aggregate substitution**: aggregates wrapped in `CASE WHEN ... THEN sum(...) ...` substitute correctly post-aggregation
+- **One-way format break**: 0.5.41+ may write columns under the new `RawI64` codec discriminant; databases written by 0.5.41+ will not open in earlier 0.5.4x WASM. The existing `__backup` rescue path preserves the snapshot under a `__backup` IndexedDB key.
+
+### Engine highlights (via Grafeo Core 0.5.42)
+
+- **Streaming top-K operator**: bounded-heap of size k, O(k) memory regardless of input cardinality. The planner fuses literal `LIMIT k` over `Sort` into a single physical operator (~12x faster than unfused Sort+Limit at N=1M)
+- **`var.prop IN [literals]` property-index fast path**: per-value index lookups unioned and deduped (~56x speedup on `WHERE id IN $ids` against a snapshot-loaded database)
+- **Filter pushdown extended through `Filter`, `LeftJoin`, `Apply`, `Union`, `Unwind`**: predicates inside `OPTIONAL MATCH` and correlated subqueries now reach the scan (~8x on `feed.hydrate`-shaped queries)
+- **Paged HNSW topology (vector store v2)**: `MmapTopology` serves neighbor lookups directly from `Bytes` slices; heap drops >10x under mmap, recall is bit-identical
+- **Packed RDF Ring (ring v2)**: sorted term dictionary + three packed wavelet trees + two permutations + CRC32, replacing bincode
+- **`MERGE ... ON CREATE/ON MATCH SET` could not reference the MERGE variable** (#317): `ON MATCH SET c.description = coalesce(c.description, 'fallback')` now binds the MERGE variable into ON CREATE / ON MATCH per ISO/IEC 39075:2024 §15.5
+- **`ORDER BY` against a `WITH` alias dropped by `RETURN`** fix: e.g. `WITH x AS s ... RETURN x ORDER BY s` no longer fails with `Variable 's' not found`
+- **Format upgrade on next checkpoint**: existing v1 vector-store and RDF-ring files keep loading via magic-byte detection and upgrade to v2 on the next checkpoint
+- Not exposed in WASM (mmap-only, no-op in browser): per-section storage tier configuration, `db.storage_tiers()`, `db.reload_eligible()`, WAL overlay for mutable mmap'd LPG
+
 ## [0.5.40-hotfix.1] - 2026-04-20
 
 ### Fixed

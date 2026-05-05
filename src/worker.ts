@@ -420,6 +420,56 @@ async function handleMessage(request: WorkerRequest): Promise<void> {
         break;
       }
 
+      case 'beginTransaction': {
+        if (!db) throw new Error('Database not initialized');
+        db.beginTransaction();
+        respond(id);
+        break;
+      }
+
+      case 'commitTransaction': {
+        if (!db) throw new Error('Database not initialized');
+        db.commitTransaction();
+        if (persistence) {
+          persistence.scheduleSave(() => db!.exportSnapshot());
+        }
+        respond(id);
+        break;
+      }
+
+      case 'rollbackTransaction': {
+        if (!db) throw new Error('Database not initialized');
+        db.rollbackTransaction();
+        respond(id);
+        break;
+      }
+
+      case 'isTransactionActive': {
+        if (!db) throw new Error('Database not initialized');
+        respond(id, db.isTransactionActive());
+        break;
+      }
+
+      case 'signedExport': {
+        if (!db) throw new Error('Database not initialized');
+        const key = args[0] as Uint8Array;
+        respond(id, db.exportSnapshotSigned(key));
+        break;
+      }
+
+      case 'signedImport': {
+        if (!db) throw new Error('Database not initialized');
+        const [data, key] = args as [Uint8Array, Uint8Array];
+        const newDb = Database.importSnapshotSigned(data, key);
+        db.free();
+        db = newDb;
+        if (persistence) {
+          persistence.scheduleSave(() => db!.exportSnapshot());
+        }
+        respond(id);
+        break;
+      }
+
       case 'close': {
         if (persistence && db) {
           await persistence.flush(() => db!.exportSnapshot());
