@@ -395,19 +395,56 @@ describe('Worker message handler', () => {
       // beginTransaction should call persistence.cancel() so the queued timer dies
       const beginRes = await send('beginTransaction', [], 262);
       expect(beginRes.error).toBeUndefined();
-      // Insert mid-tx, then rollback. If begin didn't cancel, the queued debounce
-      // would have captured mid-tx state via exportSnapshot() at fire time.
+      // Insert mid-tx. If begin didn't cancel, the queued debounce would
+      // capture mid-tx state via exportSnapshot() at fire time.
       await send('execute', ["INSERT (:Person {name: 'Bob'})"], 263);
       // Wait long enough for any uncancelled timer to fire
       await new Promise((resolve) => setTimeout(resolve, 30));
+
+      // Inspect the persisted snapshot BEFORE rollback/close — close()'s flush
+      // would otherwise overwrite any mid-tx write, masking a regression.
+      // With cancel() working, no snapshot was scheduled at all (pre-tx save
+      // was cancelled, mid-tx INSERT did not schedule). If cancel() regressed,
+      // the t=10 timer would have written [Alice, Bob] (uncommitted state).
+      const { PersistenceManager } = await import('./persistence');
+      const reader = new PersistenceManager('worker-tx-cancel-test');
+      const persistedDuringTx = await reader.load();
+      if (persistedDuringTx) {
+        const wasmModule = await import('./__mocks__/wasm');
+        const restored = wasmModule.Database.importSnapshot(persistedDuringTx);
+        // Anything persisted during the tx must NOT include uncommitted writes.
+        expect(restored.nodeCount()).toBe(1);
+        restored.free();
+      }
+
       await send('rollbackTransaction', [], 264);
       await send('close', [], 265);
+      await reader.clear();
+    });
 
-      // Re-init from persisted state and verify only Alice persisted
-      await send('init', [{ persist: 'worker-tx-cancel-test' }], 266);
-      const countRes = await send('nodeCount', [], 267);
-      expect(countRes.result).toBe(1);
-      await send('close', [], 268);
+    it('execute() schedules save after import() during a tx (no stale flag leak)', async () => {
+      await send('init', [{ persist: 'worker-tx-stale-import', persistInterval: 5 }], 280);
+      await send('execute', ["INSERT (:Person {name: 'Alice'})"], 281);
+      const expRes = await send('export', [], 282);
+      const snapshot = expRes.result as { data: Uint8Array };
+      await send('beginTransaction', [], 283);
+      // Swap WASM mid-tx. The new DB has no active tx — subsequent writes
+      // must resume scheduling save (regression test for stale-flag bug).
+      await send('import', [snapshot], 284);
+      await send('execute', ["INSERT (:Person {name: 'Bob'})"], 285);
+      await new Promise((resolve) => setTimeout(resolve, 30));
+
+      const { PersistenceManager } = await import('./persistence');
+      const reader = new PersistenceManager('worker-tx-stale-import');
+      const persisted = await reader.load();
+      expect(persisted).not.toBeNull();
+      const wasmModule = await import('./__mocks__/wasm');
+      const restored = wasmModule.Database.importSnapshot(persisted!);
+      expect(restored.nodeCount()).toBe(2);
+      restored.free();
+
+      await send('close', [], 286);
+      await reader.clear();
     });
 
     it('returns error when db not initialized', async () => {

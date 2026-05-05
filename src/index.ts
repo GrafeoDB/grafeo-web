@@ -79,7 +79,6 @@ export class GrafeoDB {
   private persistence: PersistenceManager | null;
   private proxy: WorkerProxy | null;
   private closed = false;
-  private inTransaction = false;
 
   private constructor(
     wasm: WasmDatabase | null,
@@ -198,7 +197,7 @@ export class GrafeoDB {
       result = this.wasm!.execute(query) as T[];
     }
 
-    if (this.persistence && !this.inTransaction) {
+    if (this.persistence && !this.wasm!.isTransactionActive()) {
       this.persistence.scheduleSave(() => this.wasm!.exportSnapshot());
     }
 
@@ -227,7 +226,7 @@ export class GrafeoDB {
       ? this.wasm!.executeRawWithLanguage(query, lang)
       : this.wasm!.executeRaw(query);
 
-    if (this.persistence && !this.inTransaction) {
+    if (this.persistence && !this.wasm!.isTransactionActive()) {
       this.persistence.scheduleSave(() => this.wasm!.exportSnapshot());
     }
 
@@ -296,7 +295,7 @@ export class GrafeoDB {
     const newWasm = WasmDatabase.importSnapshot(snapshot.data);
     this.wasm!.free();
     this.wasm = newWasm;
-    if (this.persistence && !this.inTransaction) {
+    if (this.persistence && !this.wasm!.isTransactionActive()) {
       this.persistence.scheduleSave(() => this.wasm!.exportSnapshot());
     }
   }
@@ -335,7 +334,7 @@ export class GrafeoDB {
     }
     this.assertFeature('createTextIndex', 'text-index');
     this.wasm!.createTextIndex(label, property);
-    if (this.persistence && !this.inTransaction) {
+    if (this.persistence && !this.wasm!.isTransactionActive()) {
       this.persistence.scheduleSave(() => this.wasm!.exportSnapshot());
     }
   }
@@ -348,7 +347,7 @@ export class GrafeoDB {
     }
     this.assertFeature('dropTextIndex', 'text-index');
     const existed = this.wasm!.dropTextIndex(label, property);
-    if (this.persistence && !this.inTransaction) {
+    if (this.persistence && !this.wasm!.isTransactionActive()) {
       this.persistence.scheduleSave(() => this.wasm!.exportSnapshot());
     }
     return existed;
@@ -362,7 +361,7 @@ export class GrafeoDB {
     }
     this.assertFeature('rebuildTextIndex', 'text-index');
     this.wasm!.rebuildTextIndex(label, property);
-    if (this.persistence && !this.inTransaction) {
+    if (this.persistence && !this.wasm!.isTransactionActive()) {
       this.persistence.scheduleSave(() => this.wasm!.exportSnapshot());
     }
   }
@@ -410,7 +409,7 @@ export class GrafeoDB {
     }
     this.assertFeature('createVectorIndex', 'vector-index');
     this.wasm!.createVectorIndex(label, property, options);
-    if (this.persistence && !this.inTransaction) {
+    if (this.persistence && !this.wasm!.isTransactionActive()) {
       this.persistence.scheduleSave(() => this.wasm!.exportSnapshot());
     }
   }
@@ -423,7 +422,7 @@ export class GrafeoDB {
     }
     this.assertFeature('dropVectorIndex', 'vector-index');
     const existed = this.wasm!.dropVectorIndex(label, property);
-    if (this.persistence && !this.inTransaction) {
+    if (this.persistence && !this.wasm!.isTransactionActive()) {
       this.persistence.scheduleSave(() => this.wasm!.exportSnapshot());
     }
     return existed;
@@ -437,7 +436,7 @@ export class GrafeoDB {
     }
     this.assertFeature('rebuildVectorIndex', 'vector-index');
     this.wasm!.rebuildVectorIndex(label, property);
-    if (this.persistence && !this.inTransaction) {
+    if (this.persistence && !this.wasm!.isTransactionActive()) {
       this.persistence.scheduleSave(() => this.wasm!.exportSnapshot());
     }
   }
@@ -493,7 +492,7 @@ export class GrafeoDB {
       return this.proxy.createProjection(name, nodeLabels, edgeTypes);
     }
     const created = this.wasm!.createProjection(name, nodeLabels, edgeTypes);
-    if (this.persistence && !this.inTransaction) {
+    if (this.persistence && !this.wasm!.isTransactionActive()) {
       this.persistence.scheduleSave(() => this.wasm!.exportSnapshot());
     }
     return created;
@@ -510,7 +509,7 @@ export class GrafeoDB {
       return this.proxy.dropProjection(name);
     }
     const existed = this.wasm!.dropProjection(name);
-    if (this.persistence && !this.inTransaction) {
+    if (this.persistence && !this.wasm!.isTransactionActive()) {
       this.persistence.scheduleSave(() => this.wasm!.exportSnapshot());
     }
     return existed;
@@ -565,7 +564,7 @@ export class GrafeoDB {
     }
     this.assertFeature('compact', 'compact-store');
     (this.wasm as unknown as { compact(): void }).compact();
-    if (this.persistence && !this.inTransaction) {
+    if (this.persistence && !this.wasm!.isTransactionActive()) {
       this.persistence.scheduleSave(() => this.wasm!.exportSnapshot());
     }
   }
@@ -612,7 +611,7 @@ export class GrafeoDB {
       return this.proxy.importRows(rows, options);
     }
     const count = this.wasm!.importRows(rows, options);
-    if (this.persistence && !this.inTransaction) {
+    if (this.persistence && !this.wasm!.isTransactionActive()) {
       this.persistence.scheduleSave(() => this.wasm!.exportSnapshot());
     }
     return count;
@@ -632,7 +631,7 @@ export class GrafeoDB {
       return this.proxy.importLpg(data);
     }
     const result = this.wasm!.importLpg(data) as LpgImportResult;
-    if (this.persistence && !this.inTransaction) {
+    if (this.persistence && !this.wasm!.isTransactionActive()) {
       this.persistence.scheduleSave(() => this.wasm!.exportSnapshot());
     }
     return result;
@@ -651,7 +650,7 @@ export class GrafeoDB {
     }
     this.assertFeature('importRdf', 'rdf');
     const result = this.wasm!.importRdf(data) as RdfImportResult;
-    if (this.persistence && !this.inTransaction) {
+    if (this.persistence && !this.wasm!.isTransactionActive()) {
       this.persistence.scheduleSave(() => this.wasm!.exportSnapshot());
     }
     return result;
@@ -668,11 +667,9 @@ export class GrafeoDB {
       return this.proxy.beginTransaction();
     }
     // Cancel any pending pre-tx save so its timer cannot fire mid-tx and
-    // capture uncommitted state. Cancel BEFORE the WASM call so a panic
-    // doesn't leave us with a stale flag.
+    // capture uncommitted state via exportSnapshot() at fire time.
     this.persistence?.cancel();
     this.wasm!.beginTransaction();
-    this.inTransaction = true;
   }
 
   /** Commits the active transaction. Persists writes if the database is persistent. */
@@ -682,8 +679,7 @@ export class GrafeoDB {
       return this.proxy.commitTransaction();
     }
     this.wasm!.commitTransaction();
-    this.inTransaction = false;
-    if (this.persistence && !this.inTransaction) {
+    if (this.persistence) {
       this.persistence.scheduleSave(() => this.wasm!.exportSnapshot());
     }
   }
@@ -695,11 +691,10 @@ export class GrafeoDB {
       return this.proxy.rollbackTransaction();
     }
     this.wasm!.rollbackTransaction();
-    this.inTransaction = false;
     // After rollback the in-memory state == pre-tx state, so a single
     // post-rollback scheduleSave is sufficient: it persists the rolled-back
     // state, which equals pre-tx state.
-    if (this.persistence && !this.inTransaction) {
+    if (this.persistence) {
       this.persistence.scheduleSave(() => this.wasm!.exportSnapshot());
     }
   }
@@ -740,7 +735,7 @@ export class GrafeoDB {
     const newWasm = WasmDatabase.importSnapshotSigned(data, key);
     this.wasm!.free();
     this.wasm = newWasm;
-    if (this.persistence && !this.inTransaction) {
+    if (this.persistence && !this.wasm!.isTransactionActive()) {
       this.persistence.scheduleSave(() => this.wasm!.exportSnapshot());
     }
   }

@@ -18,7 +18,6 @@ import type { WorkerRequest, WorkerResponse } from './types';
 
 let db: DatabaseType | null = null;
 let persistence: PersistenceManager | null = null;
-let inTransaction = false;
 
 function assertWorkerFeature(
   target: DatabaseType,
@@ -57,7 +56,6 @@ async function handleMessage(request: WorkerRequest): Promise<void> {
           db.free();
           db = null;
         }
-        inTransaction = false;
 
         await wasmInit();
 
@@ -117,7 +115,7 @@ async function handleMessage(request: WorkerRequest): Promise<void> {
         // Always save after execute: detecting mutations from query text is
         // unreliable (e.g. "MATCH (n) DELETE n" misses the mutation keyword).
         // The PersistenceManager debounce makes extra saves on reads harmless.
-        if (persistence && !inTransaction) {
+        if (persistence && !db!.isTransactionActive()) {
           persistence.scheduleSave(() => db!.exportSnapshot());
         }
 
@@ -134,7 +132,7 @@ async function handleMessage(request: WorkerRequest): Promise<void> {
           ? db.executeRawWithLanguage(query, lang)
           : db.executeRaw(query);
 
-        if (persistence && !inTransaction) {
+        if (persistence && !db!.isTransactionActive()) {
           persistence.scheduleSave(() => db!.exportSnapshot());
         }
 
@@ -168,7 +166,7 @@ async function handleMessage(request: WorkerRequest): Promise<void> {
         db.free();
         db = newDb;
 
-        if (persistence && !inTransaction) {
+        if (persistence && !db!.isTransactionActive()) {
           persistence.scheduleSave(() => db!.exportSnapshot());
         }
 
@@ -208,7 +206,7 @@ async function handleMessage(request: WorkerRequest): Promise<void> {
         const [label, property] = args as [string, string];
         assertWorkerFeature(db, 'createTextIndex', 'text-index');
         db.createTextIndex(label, property);
-        if (persistence && !inTransaction) {
+        if (persistence && !db!.isTransactionActive()) {
           persistence.scheduleSave(() => db!.exportSnapshot());
         }
         respond(id);
@@ -220,7 +218,7 @@ async function handleMessage(request: WorkerRequest): Promise<void> {
         const [label, property] = args as [string, string];
         assertWorkerFeature(db, 'dropTextIndex', 'text-index');
         const existed = db.dropTextIndex(label, property);
-        if (persistence && !inTransaction) {
+        if (persistence && !db!.isTransactionActive()) {
           persistence.scheduleSave(() => db!.exportSnapshot());
         }
         respond(id, existed);
@@ -232,7 +230,7 @@ async function handleMessage(request: WorkerRequest): Promise<void> {
         const [label, property] = args as [string, string];
         assertWorkerFeature(db, 'rebuildTextIndex', 'text-index');
         db.rebuildTextIndex(label, property);
-        if (persistence && !inTransaction) {
+        if (persistence && !db!.isTransactionActive()) {
           persistence.scheduleSave(() => db!.exportSnapshot());
         }
         respond(id);
@@ -260,7 +258,7 @@ async function handleMessage(request: WorkerRequest): Promise<void> {
         const [label, property, options] = args as [string, string, object | undefined];
         assertWorkerFeature(db, 'createVectorIndex', 'vector-index');
         (db as unknown as Record<string, CallableFunction>).createVectorIndex(label, property, options);
-        if (persistence && !inTransaction) {
+        if (persistence && !db!.isTransactionActive()) {
           persistence.scheduleSave(() => db!.exportSnapshot());
         }
         respond(id);
@@ -272,7 +270,7 @@ async function handleMessage(request: WorkerRequest): Promise<void> {
         const [label, property] = args as [string, string];
         assertWorkerFeature(db, 'dropVectorIndex', 'vector-index');
         const existed = (db as unknown as Record<string, CallableFunction>).dropVectorIndex(label, property) as boolean;
-        if (persistence && !inTransaction) {
+        if (persistence && !db!.isTransactionActive()) {
           persistence.scheduleSave(() => db!.exportSnapshot());
         }
         respond(id, existed);
@@ -284,7 +282,7 @@ async function handleMessage(request: WorkerRequest): Promise<void> {
         const [label, property] = args as [string, string];
         assertWorkerFeature(db, 'rebuildVectorIndex', 'vector-index');
         (db as unknown as Record<string, CallableFunction>).rebuildVectorIndex(label, property);
-        if (persistence && !inTransaction) {
+        if (persistence && !db!.isTransactionActive()) {
           persistence.scheduleSave(() => db!.exportSnapshot());
         }
         respond(id);
@@ -313,7 +311,7 @@ async function handleMessage(request: WorkerRequest): Promise<void> {
         if (!db) throw new Error('Database not initialized');
         const [name, nodeLabels, edgeTypes] = args as [string, string[] | undefined, string[] | undefined];
         const created = db.createProjection(name, nodeLabels, edgeTypes);
-        if (persistence && !inTransaction) {
+        if (persistence && !db!.isTransactionActive()) {
           persistence.scheduleSave(() => db!.exportSnapshot());
         }
         respond(id, created);
@@ -324,7 +322,7 @@ async function handleMessage(request: WorkerRequest): Promise<void> {
         if (!db) throw new Error('Database not initialized');
         const projName = args[0] as string;
         const existed = db.dropProjection(projName);
-        if (persistence && !inTransaction) {
+        if (persistence && !db!.isTransactionActive()) {
           persistence.scheduleSave(() => db!.exportSnapshot());
         }
         respond(id, existed);
@@ -362,7 +360,7 @@ async function handleMessage(request: WorkerRequest): Promise<void> {
         if (!db) throw new Error('Database not initialized');
         assertWorkerFeature(db, 'compact', 'compact-store');
         (db as unknown as { compact(): void }).compact();
-        if (persistence && !inTransaction) {
+        if (persistence && !db!.isTransactionActive()) {
           persistence.scheduleSave(() => db!.exportSnapshot());
         }
         respond(id);
@@ -392,7 +390,7 @@ async function handleMessage(request: WorkerRequest): Promise<void> {
         if (!db) throw new Error('Database not initialized');
         const [rows, options] = args as [object[], object];
         const count = db.importRows(rows, options);
-        if (persistence && !inTransaction) {
+        if (persistence && !db!.isTransactionActive()) {
           persistence.scheduleSave(() => db!.exportSnapshot());
         }
         respond(id, count);
@@ -403,7 +401,7 @@ async function handleMessage(request: WorkerRequest): Promise<void> {
         if (!db) throw new Error('Database not initialized');
         const data = args[0] as { nodes: unknown[]; edges: unknown[] };
         const result = (db as unknown as Record<string, CallableFunction>).importLpg(data);
-        if (persistence && !inTransaction) {
+        if (persistence && !db!.isTransactionActive()) {
           persistence.scheduleSave(() => db!.exportSnapshot());
         }
         respond(id, result);
@@ -415,7 +413,7 @@ async function handleMessage(request: WorkerRequest): Promise<void> {
         assertWorkerFeature(db, 'importRdf', 'rdf');
         const data = args[0] as { triples: unknown[] };
         const result = (db as unknown as Record<string, CallableFunction>).importRdf(data);
-        if (persistence && !inTransaction) {
+        if (persistence && !db!.isTransactionActive()) {
           persistence.scheduleSave(() => db!.exportSnapshot());
         }
         respond(id, result);
@@ -425,11 +423,9 @@ async function handleMessage(request: WorkerRequest): Promise<void> {
       case 'beginTransaction': {
         if (!db) throw new Error('Database not initialized');
         // Cancel any pending pre-tx save so its timer cannot fire mid-tx and
-        // capture uncommitted state. Cancel BEFORE the WASM call so a panic
-        // doesn't leave us with a stale flag.
+        // capture uncommitted state via exportSnapshot() at fire time.
         persistence?.cancel();
         db.beginTransaction();
-        inTransaction = true;
         respond(id);
         break;
       }
@@ -437,8 +433,7 @@ async function handleMessage(request: WorkerRequest): Promise<void> {
       case 'commitTransaction': {
         if (!db) throw new Error('Database not initialized');
         db.commitTransaction();
-        inTransaction = false;
-        if (persistence && !inTransaction) {
+        if (persistence) {
           persistence.scheduleSave(() => db!.exportSnapshot());
         }
         respond(id);
@@ -448,11 +443,10 @@ async function handleMessage(request: WorkerRequest): Promise<void> {
       case 'rollbackTransaction': {
         if (!db) throw new Error('Database not initialized');
         db.rollbackTransaction();
-        inTransaction = false;
         // After rollback the in-memory state == pre-tx state, so a single
         // post-rollback scheduleSave is sufficient: it persists the rolled-back
         // state, which equals pre-tx state.
-        if (persistence && !inTransaction) {
+        if (persistence) {
           persistence.scheduleSave(() => db!.exportSnapshot());
         }
         respond(id);
@@ -478,7 +472,7 @@ async function handleMessage(request: WorkerRequest): Promise<void> {
         const newDb = Database.importSnapshotSigned(data, key);
         db.free();
         db = newDb;
-        if (persistence && !inTransaction) {
+        if (persistence && !db!.isTransactionActive()) {
           persistence.scheduleSave(() => db!.exportSnapshot());
         }
         respond(id);
@@ -494,7 +488,6 @@ async function handleMessage(request: WorkerRequest): Promise<void> {
           db.free();
           db = null;
         }
-        inTransaction = false;
         respond(id);
         break;
       }

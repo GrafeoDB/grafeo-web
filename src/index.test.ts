@@ -869,6 +869,63 @@ describe('GrafeoDB', () => {
         await new PersistenceManager('tx-defer-resume').clear();
       }
     });
+
+    it('execute() schedules save after import() during a tx (no stale flag leak)', async () => {
+      const pdb = await GrafeoDB.create({ persist: 'tx-stale-flag-import' });
+      try {
+        const persistence = getPersistence(pdb);
+        await pdb.execute("INSERT (:Person {name: 'Alice'})");
+        const snapshot = await pdb.export();
+        await pdb.beginTransaction();
+        await pdb.import(snapshot);
+        const saveSpy = vi.spyOn(persistence, 'scheduleSave');
+        await pdb.execute("INSERT (:Person {name: 'Bob'})");
+        expect(saveSpy).toHaveBeenCalled();
+        saveSpy.mockRestore();
+      } finally {
+        await pdb.close();
+        const { PersistenceManager } = await import('./persistence');
+        await new PersistenceManager('tx-stale-flag-import').clear();
+      }
+    });
+
+    it('execute() schedules save after signedImport() during a tx', async () => {
+      const pdb = await GrafeoDB.create({ persist: 'tx-stale-flag-signed' });
+      try {
+        const persistence = getPersistence(pdb);
+        const key = new Uint8Array([1, 2, 3, 4]);
+        await pdb.execute("INSERT (:Person {name: 'Alice'})");
+        const signed = await pdb.signedExport(key);
+        await pdb.beginTransaction();
+        await pdb.signedImport(signed, key);
+        const saveSpy = vi.spyOn(persistence, 'scheduleSave');
+        await pdb.execute("INSERT (:Person {name: 'Bob'})");
+        expect(saveSpy).toHaveBeenCalled();
+        saveSpy.mockRestore();
+      } finally {
+        await pdb.close();
+        const { PersistenceManager } = await import('./persistence');
+        await new PersistenceManager('tx-stale-flag-signed').clear();
+      }
+    });
+
+    it('execute() schedules save after clear() during a tx', async () => {
+      const pdb = await GrafeoDB.create({ persist: 'tx-stale-flag-clear' });
+      try {
+        const persistence = getPersistence(pdb);
+        await pdb.execute("INSERT (:Person {name: 'Alice'})");
+        await pdb.beginTransaction();
+        await pdb.clear();
+        const saveSpy = vi.spyOn(persistence, 'scheduleSave');
+        await pdb.execute("INSERT (:Person {name: 'Bob'})");
+        expect(saveSpy).toHaveBeenCalled();
+        saveSpy.mockRestore();
+      } finally {
+        await pdb.close();
+        const { PersistenceManager } = await import('./persistence');
+        await new PersistenceManager('tx-stale-flag-clear').clear();
+      }
+    });
   });
 
   describe('persistence scheduling (isMutatingQuery removal)', () => {

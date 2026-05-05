@@ -34,7 +34,6 @@ export class GrafeoDB {
   private wasm: WasmDatabase | null;
   private persistence: PersistenceManager | null;
   private closed = false;
-  private inTransaction = false;
 
   private constructor(
     wasm: WasmDatabase,
@@ -104,7 +103,7 @@ export class GrafeoDB {
       ? this.wasm!.executeWithParams(query, params)
       : this.wasm!.execute(query);
 
-    if (this.persistence && !this.inTransaction) {
+    if (this.persistence && !this.wasm!.isTransactionActive()) {
       this.persistence.scheduleSave(() => this.wasm!.exportSnapshot());
     }
 
@@ -116,7 +115,7 @@ export class GrafeoDB {
     this.assertOpen();
     const result = this.wasm!.executeRaw(query);
 
-    if (this.persistence && !this.inTransaction) {
+    if (this.persistence && !this.wasm!.isTransactionActive()) {
       this.persistence.scheduleSave(() => this.wasm!.exportSnapshot());
     }
 
@@ -156,7 +155,7 @@ export class GrafeoDB {
   ): Promise<boolean> {
     this.assertOpen();
     const created = this.wasm!.createProjection(name, nodeLabels, edgeTypes);
-    if (this.persistence && !this.inTransaction) {
+    if (this.persistence && !this.wasm!.isTransactionActive()) {
       this.persistence.scheduleSave(() => this.wasm!.exportSnapshot());
     }
     return created;
@@ -170,7 +169,7 @@ export class GrafeoDB {
   async dropProjection(name: string): Promise<boolean> {
     this.assertOpen();
     const existed = this.wasm!.dropProjection(name);
-    if (this.persistence && !this.inTransaction) {
+    if (this.persistence && !this.wasm!.isTransactionActive()) {
       this.persistence.scheduleSave(() => this.wasm!.exportSnapshot());
     }
     return existed;
@@ -234,7 +233,7 @@ export class GrafeoDB {
     const newWasm = WasmDatabase.importSnapshot(snapshot.data);
     this.wasm!.free();
     this.wasm = newWasm;
-    if (this.persistence && !this.inTransaction) {
+    if (this.persistence && !this.wasm!.isTransactionActive()) {
       this.persistence.scheduleSave(() => this.wasm!.exportSnapshot());
     }
   }
@@ -266,19 +265,16 @@ export class GrafeoDB {
   async beginTransaction(): Promise<void> {
     this.assertOpen();
     // Cancel any pending pre-tx save so its timer cannot fire mid-tx and
-    // capture uncommitted state. Cancel BEFORE the WASM call so a panic
-    // doesn't leave us with a stale flag.
+    // capture uncommitted state via exportSnapshot() at fire time.
     this.persistence?.cancel();
     this.wasm!.beginTransaction();
-    this.inTransaction = true;
   }
 
   /** Commits the active transaction. Persists writes if the database is persistent. */
   async commitTransaction(): Promise<void> {
     this.assertOpen();
     this.wasm!.commitTransaction();
-    this.inTransaction = false;
-    if (this.persistence && !this.inTransaction) {
+    if (this.persistence) {
       this.persistence.scheduleSave(() => this.wasm!.exportSnapshot());
     }
   }
@@ -287,11 +283,10 @@ export class GrafeoDB {
   async rollbackTransaction(): Promise<void> {
     this.assertOpen();
     this.wasm!.rollbackTransaction();
-    this.inTransaction = false;
     // After rollback the in-memory state == pre-tx state, so a single
     // post-rollback scheduleSave is sufficient: it persists the rolled-back
     // state, which equals pre-tx state.
-    if (this.persistence && !this.inTransaction) {
+    if (this.persistence) {
       this.persistence.scheduleSave(() => this.wasm!.exportSnapshot());
     }
   }
@@ -322,7 +317,7 @@ export class GrafeoDB {
     const newWasm = WasmDatabase.importSnapshotSigned(data, key);
     this.wasm!.free();
     this.wasm = newWasm;
-    if (this.persistence && !this.inTransaction) {
+    if (this.persistence && !this.wasm!.isTransactionActive()) {
       this.persistence.scheduleSave(() => this.wasm!.exportSnapshot());
     }
   }
