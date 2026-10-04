@@ -571,14 +571,21 @@ describe('GrafeoDB', () => {
       expect(count).toBe(1);
     });
 
-    it('triggers persistence when persisted', async () => {
-      const pdb = await GrafeoDB.create({ persist: 'rows-import-test' });
-      const count = await pdb.importRows(
-        [{ name: 'Alice' }],
-        { mode: 'nodes', label: 'Person' },
-      );
-      expect(count).toBe(1);
-      await pdb.close();
+    // 0.5.44: direct writes are checked like INSERT, so the engine throws on a
+    // row that breaks a constraint, naming the row.
+    it('rejects with the engine error and stays usable', async () => {
+      const wasm = (db as unknown as { wasm: { importRows: (...args: unknown[]) => number } }).wasm;
+      vi.spyOn(wasm, 'importRows').mockImplementationOnce(() => {
+        throw new Error('rows[2]: GRAFEO-V001: Invalid value: UNIQUE constraint violation');
+      });
+
+      await expect(
+        db.importRows([{ email: 'a' }, { email: 'b' }, { email: 'a' }], { mode: 'nodes', label: 'Person' }),
+      ).rejects.toThrow(/rows\[2\].*UNIQUE constraint violation/);
+
+      expect(db.isOpen).toBe(true);
+      await db.execute("INSERT (:Person {name: 'Alice'})");
+      expect(await db.nodeCount()).toBe(1);
     });
   });
 
@@ -609,14 +616,15 @@ describe('GrafeoDB', () => {
       expect(await db.nodeCount()).toBe(1);
     });
 
-    it('triggers persistence when persisted', async () => {
-      const pdb = await GrafeoDB.create({ persist: 'lpg-import-test' });
-      const result = await pdb.importLpg({
-        nodes: [{ labels: ['Person'], properties: { name: 'Alice' } }],
-        edges: [],
-      });
-      expect(result.nodes).toBe(1);
-      await pdb.close();
+    it('rejects an out-of-bounds edge index with the engine error', async () => {
+      await expect(
+        db.importLpg({
+          nodes: [{ labels: ['Person'] }],
+          edges: [{ source: 0, target: 5, type: 'KNOWS' }],
+        }),
+      ).rejects.toThrow('edges[0].target index 5 out of bounds (0..1)');
+
+      expect(db.isOpen).toBe(true);
     });
   });
 
@@ -928,43 +936,88 @@ describe('GrafeoDB', () => {
     });
   });
 
-  describe('persistence scheduling (isMutatingQuery removal)', () => {
-    it('schedules save after INSERT', async () => {
-      const pdb = await GrafeoDB.create({ persist: 'persist-insert-test' });
-      // INSERT is an obviously mutating query, should always trigger save
-      await pdb.execute("INSERT (:Person {name: 'Alix'})");
-      // If we reach here without error, persistence scheduling succeeded
-      await pdb.close();
-    });
+  describe('persistence scheduling (every write path)', () => {
+    const key = new Uint8Array(16).fill(7);
 
-    it('schedules save after MATCH...DELETE (previously missed)', async () => {
-      const pdb = await GrafeoDB.create({ persist: 'persist-delete-test' });
-      await pdb.execute("INSERT (:Temp {name: 'del'})");
-      // MATCH (n) DELETE n was the primary pattern missed by the old isMutatingQuery regex
-      await pdb.execute('MATCH (n:Temp) DELETE n');
-      await pdb.close();
-    });
+    // `setup` runs before the spy is attached, so only `write` is measured.
+    // Every query schedules a save, reads included: detecting mutations from
+    // query text proved unreliable (MATCH ... DELETE / SET were missed).
+    const writes: Array<{
+      name: string;
+      setup?: (d: GrafeoDBInstance) => Promise<unknown>;
+      write: (d: GrafeoDBInstance) => Promise<unknown>;
+    }> = [
+      { name: 'execute (INSERT)', write: (d) => d.execute("INSERT (:Person {name: 'Alix'})") },
+      {
+        name: 'execute (MATCH ... DELETE)',
+        setup: (d) => d.execute("INSERT (:Temp {name: 'del'})"),
+        write: (d) => d.execute('MATCH (n:Temp) DELETE n'),
+      },
+      {
+        name: 'execute (MATCH ... SET)',
+        setup: (d) => d.execute("INSERT (:Temp {name: 'upd', age: 1})"),
+        write: (d) => d.execute('MATCH (n:Temp) SET n.age = 2'),
+      },
+      { name: 'execute (read-only, by design)', write: (d) => d.execute('MATCH (n) RETURN n') },
+      { name: 'executeRaw', write: (d) => d.executeRaw("INSERT (:Person {name: 'Alix'})") },
+      { name: 'import', write: async (d) => d.import(await d.export()) },
+      { name: 'createTextIndex', write: (d) => d.createTextIndex('Person', 'name') },
+      { name: 'dropTextIndex', write: (d) => d.dropTextIndex('Person', 'name') },
+      { name: 'rebuildTextIndex', write: (d) => d.rebuildTextIndex('Person', 'name') },
+      { name: 'createVectorIndex', write: (d) => d.createVectorIndex('Doc', 'embedding') },
+      { name: 'dropVectorIndex', write: (d) => d.dropVectorIndex('Doc', 'embedding') },
+      { name: 'rebuildVectorIndex', write: (d) => d.rebuildVectorIndex('Doc', 'embedding') },
+      { name: 'createProjection', write: (d) => d.createProjection('social', ['Person']) },
+      {
+        name: 'dropProjection',
+        setup: (d) => d.createProjection('social', ['Person']),
+        write: (d) => d.dropProjection('social'),
+      },
+      { name: 'compact', write: (d) => d.compact() },
+      {
+        name: 'importRows',
+        write: (d) => d.importRows([{ name: 'Alix' }], { mode: 'nodes', label: 'Person' }),
+      },
+      {
+        name: 'importLpg',
+        write: (d) => d.importLpg({ nodes: [{ labels: ['Person'] }], edges: [] }),
+      },
+      {
+        name: 'importRdf',
+        write: (d) =>
+          d.importRdf({ triples: [{ subject: 'http://ex/a', predicate: 'http://ex/p', object: 'http://ex/b' }] }),
+      },
+      {
+        name: 'commitTransaction',
+        setup: async (d) => {
+          await d.beginTransaction();
+          await d.execute("INSERT (:Person {name: 'Alix'})");
+        },
+        write: (d) => d.commitTransaction(),
+      },
+      {
+        name: 'rollbackTransaction',
+        setup: async (d) => {
+          await d.beginTransaction();
+          await d.execute("INSERT (:Person {name: 'Alix'})");
+        },
+        write: (d) => d.rollbackTransaction(),
+      },
+      { name: 'signedImport', write: async (d) => d.signedImport(await d.signedExport(key), key) },
+    ];
 
-    it('schedules save after MATCH...SET (previously missed)', async () => {
-      const pdb = await GrafeoDB.create({ persist: 'persist-set-test' });
-      await pdb.execute("INSERT (:Temp {name: 'upd', age: 1})");
-      // MATCH ... SET was another missed pattern
-      await pdb.execute('MATCH (n:Temp) SET n.age = 2');
-      await pdb.close();
-    });
-
-    it('schedules save after read-only query (by design)', async () => {
-      const pdb = await GrafeoDB.create({ persist: 'persist-read-test' });
-      await pdb.execute("INSERT (:Person {name: 'Alix'})");
-      // Even read queries now trigger save (the fix removes isMutatingQuery entirely)
-      await pdb.execute('MATCH (n) RETURN n');
-      await pdb.close();
-    });
-
-    it('schedules save after executeRaw', async () => {
-      const pdb = await GrafeoDB.create({ persist: 'persist-raw-test' });
-      await pdb.executeRaw("INSERT (:Person {name: 'Alix'})");
-      await pdb.close();
+    it.each(writes)('$name schedules a save', async ({ name, setup, write }) => {
+      const pdb = await GrafeoDB.create({ persist: `persist-save-${name}` });
+      try {
+        await setup?.(pdb);
+        const persistence = (pdb as unknown as { persistence: { scheduleSave: () => void } }).persistence;
+        const saveSpy = vi.spyOn(persistence, 'scheduleSave');
+        await write(pdb);
+        expect(saveSpy).toHaveBeenCalledTimes(1);
+        saveSpy.mockRestore();
+      } finally {
+        await pdb.close();
+      }
     });
   });
 });
@@ -1390,6 +1443,81 @@ describe('GrafeoDB (worker mode)', () => {
     respondToLast(mockResults);
     const result = await promise;
     expect(result).toEqual(mockResults);
+
+    const closePromise = wdb.close();
+    respondToLast(undefined);
+    await closePromise;
+  });
+
+  // Each method must reach the worker under its own name, with its arguments,
+  // and hand back what the worker answers.
+  const snapshot = { version: 1, data: new Uint8Array([4]), timestamp: 1 };
+  const queryVector = new Float32Array([1, 0]);
+  const delegations: Array<{
+    method: string;
+    call: (d: GrafeoDBInstance) => Promise<unknown>;
+    args: unknown[];
+    result?: unknown;
+  }> = [
+    { method: 'version', call: (d) => d.getVersion(), args: [], result: '0.5.44' },
+    {
+      method: 'execute',
+      call: (d) => d.execute('MATCH (n) RETURN n', { language: 'cypher' }),
+      args: ['MATCH (n) RETURN n', { language: 'cypher' }],
+      result: [{ n: 1 }],
+    },
+    {
+      method: 'executeRaw',
+      call: (d) => d.executeRaw('MATCH (n) RETURN n'),
+      args: ['MATCH (n) RETURN n', undefined],
+      result: { columns: ['n'], rows: [[1]] },
+    },
+    { method: 'nodeCount', call: (d) => d.nodeCount(), args: [], result: 3 },
+    { method: 'edgeCount', call: (d) => d.edgeCount(), args: [], result: 2 },
+    { method: 'schema', call: (d) => d.schema(), args: [], result: { lpg: { labels: ['Person'] } } },
+    { method: 'storageStats', call: (d) => d.storageStats(), args: [], result: { bytesUsed: 10, quota: 100 } },
+    { method: 'export', call: (d) => d.export(), args: [], result: snapshot },
+    { method: 'import', call: (d) => d.import(snapshot), args: [snapshot] },
+    { method: 'clear', call: (d) => d.clear(), args: [] },
+    {
+      method: 'dropVectorIndex',
+      call: (d) => d.dropVectorIndex('Doc', 'embedding'),
+      args: ['Doc', 'embedding'],
+      result: true,
+    },
+    {
+      method: 'rebuildVectorIndex',
+      call: (d) => d.rebuildVectorIndex('Doc', 'embedding'),
+      args: ['Doc', 'embedding'],
+    },
+    {
+      method: 'mmrSearch',
+      call: (d) => d.mmrSearch('Doc', 'embedding', queryVector, 3),
+      args: ['Doc', 'embedding', queryVector, 3, undefined],
+      result: [{ id: 1, distance: 0.1 }],
+    },
+  ];
+
+  it.each(delegations)('delegates $method through proxy', async ({ method, call, args, result }) => {
+    const wdb = await createWorkerDb();
+    const promise = call(wdb);
+    respondToLast(result);
+    expect(await promise).toEqual(result);
+
+    const lastCall = mockWorker.postMessage.mock.calls.at(-1)![0];
+    expect(lastCall.method).toBe(method);
+    expect(lastCall.args).toEqual(args);
+
+    const closePromise = wdb.close();
+    respondToLast(undefined);
+    await closePromise;
+  });
+
+  it('rejects with the error the worker reports', async () => {
+    const wdb = await createWorkerDb();
+    const promise = wdb.importRows([{ email: 'a' }], { mode: 'nodes', label: 'Person' });
+    respondToLast(undefined, 'rows[0]: GRAFEO-V001: Invalid value: UNIQUE constraint violation');
+    await expect(promise).rejects.toThrow(/rows\[0\].*UNIQUE constraint violation/);
 
     const closePromise = wdb.close();
     respondToLast(undefined);

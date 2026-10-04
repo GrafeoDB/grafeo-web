@@ -32,6 +32,10 @@ jobs:
       - name: Test
         run: npm test
 
+      # Real @grafeo-db/wasm and wasm-lite binaries, not the mocks
+      - name: Integration test
+        run: npm run test:integration
+
       - name: Check types
         run: npx tsc --noEmit
 

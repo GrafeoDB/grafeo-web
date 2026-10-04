@@ -202,7 +202,16 @@ export class Database {
     for (const node of data.nodes) {
       this.nodes.push({ labels: node.labels, properties: node.properties ?? {} });
     }
-    for (const edge of data.edges) {
+    // Like the real binding: nodes are written first, then a bad edge index
+    // fails the call (the nodes stay).
+    for (const [i, edge] of data.edges.entries()) {
+      for (const end of ['source', 'target'] as const) {
+        if (edge[end] < 0 || edge[end] >= data.nodes.length) {
+          throw new Error(
+            `edges[${i}].${end} index ${edge[end]} out of bounds (0..${data.nodes.length})`,
+          );
+        }
+      }
       this.edges.push({
         type: edge.type,
         sourceIdx: startIdx + edge.source,
