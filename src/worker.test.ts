@@ -164,17 +164,24 @@ describe('Worker message handler', () => {
 
     // clear deletes the stored snapshot instead of scheduling a save.
     it('also removes the persisted snapshot', async () => {
-      await send('init', [{ persist: 'worker-clear-persisted' }]);
-      await send('execute', ["INSERT (:Person {name: 'Alice'})"]);
-      await send('close');
+      const persist = 'worker-clear-persisted';
+      await new PersistenceManager(persist).clear();
+      try {
+        await send('init', [{ persist }]);
+        await send('execute', ["INSERT (:Person {name: 'Alice'})"]);
+        await send('close');
 
-      await send('init', [{ persist: 'worker-clear-persisted' }]);
-      expect((await send('nodeCount')).result).toBe(1);
-      await send('clear');
-      await send('close');
+        await send('init', [{ persist }]);
+        expect((await send('nodeCount')).result).toBe(1);
+        await send('clear');
+        await send('close');
 
-      await send('init', [{ persist: 'worker-clear-persisted' }]);
-      expect((await send('nodeCount')).result).toBe(0);
+        await send('init', [{ persist }]);
+        expect((await send('nodeCount')).result).toBe(0);
+      } finally {
+        await send('close');
+        await new PersistenceManager(persist).clear();
+      }
     });
   });
 

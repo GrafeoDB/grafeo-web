@@ -524,18 +524,25 @@ describe('GrafeoDB (lite)', () => {
 
   describe('clear() with persistence', () => {
     it('also removes the persisted snapshot', async () => {
-      const first = await GrafeoDB.create({ persist: 'lite-clear-persisted' });
-      await first.execute("INSERT (:Person {name: 'Alice'})");
-      await first.close();
+      const { PersistenceManager } = await import('./persistence');
+      const persist = 'lite-clear-persisted';
+      await new PersistenceManager(persist).clear();
+      try {
+        const first = await GrafeoDB.create({ persist });
+        await first.execute("INSERT (:Person {name: 'Alice'})");
+        await first.close();
 
-      const second = await GrafeoDB.create({ persist: 'lite-clear-persisted' });
-      expect(await second.nodeCount()).toBe(1);
-      await second.clear();
-      await second.close();
+        const second = await GrafeoDB.create({ persist });
+        expect(await second.nodeCount()).toBe(1);
+        await second.clear();
+        await second.close();
 
-      const third = await GrafeoDB.create({ persist: 'lite-clear-persisted' });
-      expect(await third.nodeCount()).toBe(0);
-      await third.close();
+        const third = await GrafeoDB.create({ persist });
+        expect(await third.nodeCount()).toBe(0);
+        await third.close();
+      } finally {
+        await new PersistenceManager(persist).clear();
+      }
     });
   });
 
