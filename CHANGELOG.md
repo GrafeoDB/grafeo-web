@@ -2,6 +2,16 @@
 
 All notable changes to `@grafeo-db/web`.
 
+## [0.5.44] - 2026-10-04
+
+_Align with Grafeo Core 0.5.44_
+
+### Changed
+
+- **`@grafeo-db/wasm`**: updated to 0.5.44
+- **`@grafeo-db/wasm-lite`**: updated to 0.5.44
+
+
 ## [0.5.42] - 2026-05-05
 
 Catches up on Grafeo Core 0.5.41 + 0.5.42. Two new wrapper APIs (explicit transactions and HMAC-signed snapshots) plus a basket of transparent engine improvements: streaming top-K, IN-list index fast path, paged HNSW topology, packed RDF Ring, wasm32 simd128 distance kernels.
