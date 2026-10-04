@@ -3,24 +3,31 @@ name: Publish
 on:
   release:
     types: [published]
+  # Release.yml dispatches this: a release it creates with GITHUB_TOKEN does not
+  # fire the `release` event. Also usable by hand.
+  workflow_dispatch:
 
 jobs:
   publish:
     runs-on: ubuntu-latest
+    environment: npm
 
     permissions:
       contents: read
       id-token: write
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Setup Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v7
         with:
-          node-version: 20
+          node-version: '24'
           cache: 'npm'
           registry-url: 'https://registry.npmjs.org'
+
+      - name: Update npm (trusted publishing needs 11.5.1 or later)
+        run: npm install -g npm@^11.5.1
 
       - name: Install dependencies
         run: npm ci
@@ -28,7 +35,15 @@ jobs:
       - name: Build
         run: npm run build
 
+      # Trusted publishing (OIDC), no token. A version already on npm is
+      # skipped, so a re-run is safe while a real failure still fails the job.
       - name: Publish to npm
-        run: npm publish --provenance --access public
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          NAME=$(node -p "require('./package.json').name")
+          VERSION=$(node -p "require('./package.json').version")
+          if [ -n "$(npm view "${NAME}@${VERSION}" version 2>/dev/null || true)" ]; then
+            echo "${NAME}@${VERSION} is already on npm, skipping"
+            exit 0
+          fi
+          echo "Publishing ${NAME}@${VERSION}"
+          npm publish --access public
