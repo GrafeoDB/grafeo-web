@@ -161,6 +161,21 @@ describe('Worker message handler', () => {
       const res = await send('nodeCount', [], 4);
       expect(res.result).toBe(0);
     });
+
+    // clear deletes the stored snapshot instead of scheduling a save.
+    it('also removes the persisted snapshot', async () => {
+      await send('init', [{ persist: 'worker-clear-persisted' }]);
+      await send('execute', ["INSERT (:Person {name: 'Alice'})"]);
+      await send('close');
+
+      await send('init', [{ persist: 'worker-clear-persisted' }]);
+      expect((await send('nodeCount')).result).toBe(1);
+      await send('clear');
+      await send('close');
+
+      await send('init', [{ persist: 'worker-clear-persisted' }]);
+      expect((await send('nodeCount')).result).toBe(0);
+    });
   });
 
   describe('storageStats', () => {
@@ -624,11 +639,12 @@ describe('Worker message handler', () => {
     });
   });
 
-  describe('persistence scheduling (every write path)', () => {
+  describe('persistence scheduling (every write path that saves)', () => {
     const key = new Uint8Array(16).fill(7);
 
     // `setup` messages run before the spy is attached, so only the write is
     // measured. `args` may be computed from the database (export, signedExport).
+    // clear deletes the stored snapshot instead (see 'clear').
     const writes: Array<{
       method: string;
       setup?: Array<[string, unknown[]]>;
@@ -664,7 +680,8 @@ describe('Worker message handler', () => {
     ];
 
     it.each(writes)('$method schedules a save', async ({ method, setup = [], args = [] }) => {
-      await send('init', [{ persist: `worker-save-${method}` }]);
+      const persistKey = `worker-save-${method}`;
+      await send('init', [{ persist: persistKey }]);
       for (const [m, a] of setup) {
         expect((await send(m, a)).error).toBeUndefined();
       }
@@ -677,6 +694,8 @@ describe('Worker message handler', () => {
         expect(saveSpy).toHaveBeenCalledTimes(1);
       } finally {
         saveSpy.mockRestore();
+        await send('close');
+        await new PersistenceManager(persistKey).clear();
       }
     });
   });

@@ -196,6 +196,22 @@ describe('GrafeoDB', () => {
       await db.clear();
       expect(await db.nodeCount()).toBe(0);
     });
+
+    // clear() deletes the stored snapshot instead of scheduling a save.
+    it('also removes the persisted snapshot', async () => {
+      const first = await GrafeoDB.create({ persist: 'full-clear-persisted' });
+      await first.execute("INSERT (:Person {name: 'Alice'})");
+      await first.close();
+
+      const second = await GrafeoDB.create({ persist: 'full-clear-persisted' });
+      expect(await second.nodeCount()).toBe(1);
+      await second.clear();
+      await second.close();
+
+      const third = await GrafeoDB.create({ persist: 'full-clear-persisted' });
+      expect(await third.nodeCount()).toBe(0);
+      await third.close();
+    });
   });
 
   describe('close()', () => {
@@ -936,12 +952,13 @@ describe('GrafeoDB', () => {
     });
   });
 
-  describe('persistence scheduling (every write path)', () => {
+  describe('persistence scheduling (every write path that saves)', () => {
     const key = new Uint8Array(16).fill(7);
 
     // `setup` runs before the spy is attached, so only `write` is measured.
     // Every query schedules a save, reads included: detecting mutations from
     // query text proved unreliable (MATCH ... DELETE / SET were missed).
+    // clear() deletes the stored snapshot instead (see 'clear()').
     const writes: Array<{
       name: string;
       setup?: (d: GrafeoDBInstance) => Promise<unknown>;
@@ -1007,7 +1024,8 @@ describe('GrafeoDB', () => {
     ];
 
     it.each(writes)('$name schedules a save', async ({ name, setup, write }) => {
-      const pdb = await GrafeoDB.create({ persist: `persist-save-${name}` });
+      const persistKey = `persist-save-${name}`;
+      const pdb = await GrafeoDB.create({ persist: persistKey });
       try {
         await setup?.(pdb);
         const persistence = (pdb as unknown as { persistence: { scheduleSave: () => void } }).persistence;
@@ -1017,6 +1035,8 @@ describe('GrafeoDB', () => {
         saveSpy.mockRestore();
       } finally {
         await pdb.close();
+        const { PersistenceManager } = await import('./persistence');
+        await new PersistenceManager(persistKey).clear();
       }
     });
   });

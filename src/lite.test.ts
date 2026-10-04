@@ -499,9 +499,12 @@ describe('GrafeoDB (lite)', () => {
   describe('schema()', () => {
     it('returns schema information', async () => {
       await db.execute("INSERT (:Person {name: 'Alice'})");
-      const schema = await db.schema();
-      expect(schema).toBeDefined();
-      expect(typeof schema).toBe('object');
+      expect(await db.schema()).toEqual({
+        mode: 'lpg',
+        labels: [{ name: 'Person', count: 1 }],
+        edge_types: [],
+        property_keys: ['name'],
+      });
     });
   });
 
@@ -536,10 +539,11 @@ describe('GrafeoDB (lite)', () => {
     });
   });
 
-  describe('persistence scheduling (every write path)', () => {
+  describe('persistence scheduling (every write path that saves)', () => {
     const key = new Uint8Array(16).fill(7);
 
     // `setup` runs before the spy is attached, so only `write` is measured.
+    // clear() deletes the stored snapshot instead (see 'clear() with persistence').
     const writes: Array<{
       name: string;
       setup?: (d: GrafeoDBInstance) => Promise<unknown>;
@@ -574,7 +578,8 @@ describe('GrafeoDB (lite)', () => {
     ];
 
     it.each(writes)('$name schedules a save', async ({ name, setup, write }) => {
-      const pdb = await GrafeoDB.create({ persist: `lite-save-${name}` });
+      const persistKey = `lite-save-${name}`;
+      const pdb = await GrafeoDB.create({ persist: persistKey });
       try {
         await setup?.(pdb);
         const persistence = (pdb as unknown as { persistence: { scheduleSave: () => void } }).persistence;
@@ -584,6 +589,8 @@ describe('GrafeoDB (lite)', () => {
         saveSpy.mockRestore();
       } finally {
         await pdb.close();
+        const { PersistenceManager } = await import('./persistence');
+        await new PersistenceManager(persistKey).clear();
       }
     });
   });

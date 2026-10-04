@@ -20,7 +20,7 @@ Catches up on Grafeo Core 0.5.43 + 0.5.44. No new wrapper API. The engine's corr
 ### Internal
 
 - **Integration tests run in CI** on Node 22, 24 and 25, against the real `@grafeo-db/wasm` and `@grafeo-db/wasm-lite` binaries. New: both wrappers (full and lite) on the real engine with IndexedDB persistence and reload, signed snapshots, transactions (including a failed statement inside one), the import constraint checks, and a v4 snapshot exported by wasm 0.5.42 that every release must still load.
-- **Unit tests assert what they name**: every write path of the full build, the lite build and the worker is checked to schedule exactly one save (previously several such tests asserted nothing); every worker method is checked to reach the worker under its own name with its arguments; every worker handler reports `Database not initialized` after close; and import errors reach the caller in direct and worker mode. A new test keeps the wasm dependencies pinned to the release's core version.
+- **Unit tests assert what they name**: every write path that saves, in the full build, the lite build and the worker, is checked to schedule exactly one save (previously several such tests asserted nothing), and `clear()` to delete the stored snapshot instead; every worker method is checked to reach the worker under its own name with its arguments; every worker handler reports `Database not initialized` after close; and import errors reach the caller in direct and worker mode. A new test keeps the wasm dependencies pinned to the release's core version.
 - **Publishing uses npm trusted publishing** (OIDC, no token) and is started by the Release workflow, so a version bump merged to `main` reaches npm without a manual step.
 
 ### Compatibility

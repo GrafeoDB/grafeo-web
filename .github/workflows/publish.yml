@@ -26,6 +26,17 @@ jobs:
           cache: 'npm'
           registry-url: 'https://registry.npmjs.org'
 
+      # Publish only from this version's release tag: the release event and the
+      # dispatch from release.yml both run on refs/tags/v<version>. A manual run
+      # from a branch, or from a tag that does not match package.json, stops.
+      - name: Check the ref is this version's release tag
+        run: |
+          VERSION=$(node -p "require('./package.json').version")
+          if [ "$GITHUB_REF" != "refs/tags/v${VERSION}" ]; then
+            echo "::error::Refusing to publish ${VERSION} from ${GITHUB_REF}; run it on tag v${VERSION}"
+            exit 1
+          fi
+
       - name: Update npm (trusted publishing needs 11.5.1 or later)
         run: npm install -g npm@^11.5.1
 
