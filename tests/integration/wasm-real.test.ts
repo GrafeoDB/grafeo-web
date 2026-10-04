@@ -9,12 +9,16 @@ import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 
-// Load the WASM module manually for Node.js (no fetch/URL support)
+// Load the WASM module manually for Node.js (no fetch/URL support).
+// A --target web build exports a `default` init fn; a --target bundler build
+// (what npm ships) initializes on import and has no `default` (see wasm-init.ts).
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const wasmPath = resolve(__dirname, '../../node_modules/@grafeo-db/wasm/grafeo_wasm_bg.wasm');
 const wasmModule = await import('@grafeo-db/wasm');
-const wasmBytes = await readFile(wasmPath);
-await wasmModule.default(wasmBytes);
+const init = (wasmModule as { default?: (bytes: Uint8Array) => Promise<unknown> }).default;
+if (typeof init === 'function') {
+  await init(await readFile(wasmPath));
+}
 
 const { Database } = wasmModule;
 
@@ -205,6 +209,41 @@ describe('Real WASM: Bulk import', () => {
     expect(result.edges).toBe(1);
     expect(db.nodeCount()).toBe(2);
     expect(db.edgeCount()).toBe(1);
+
+    db.free();
+  });
+
+  // 0.5.44: direct writes are checked like INSERT, so bulk imports throw on a
+  // constraint violation. Rows before the failing one stay written.
+  it('importRows rejects a row that violates a UNIQUE constraint (0.5.44)', () => {
+    const db = new Database();
+    db.execute('CREATE CONSTRAINT FOR (p:Person) ON (p.email) UNIQUE');
+
+    expect(() =>
+      db.importRows([{ email: 'a@x' }, { email: 'b@x' }, { email: 'a@x' }], {
+        mode: 'nodes',
+        label: 'Person',
+      }),
+    ).toThrow(/rows\[2\].*UNIQUE constraint violation/);
+    expect(db.nodeCount()).toBe(2);
+
+    db.free();
+  });
+
+  it('importLpg rejects a node that violates a UNIQUE constraint (0.5.44)', () => {
+    const db = new Database();
+    db.execute('CREATE CONSTRAINT FOR (p:Person) ON (p.email) UNIQUE');
+
+    expect(() =>
+      db.importLpg({
+        nodes: [
+          { labels: ['Person'], properties: { email: 'c@x' } },
+          { labels: ['Person'], properties: { email: 'c@x' } },
+        ],
+        edges: [],
+      }),
+    ).toThrow(/UNIQUE constraint violation/);
+    expect(db.nodeCount()).toBe(1);
 
     db.free();
   });
