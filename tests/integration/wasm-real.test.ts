@@ -9,12 +9,16 @@ import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 
-// Load the WASM module manually for Node.js (no fetch/URL support)
+// Load the WASM module manually for Node.js (no fetch/URL support).
+// A --target web build exports a `default` init fn; a --target bundler build
+// (what npm ships) initializes on import and has no `default` (see wasm-init.ts).
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const wasmPath = resolve(__dirname, '../../node_modules/@grafeo-db/wasm/grafeo_wasm_bg.wasm');
 const wasmModule = await import('@grafeo-db/wasm');
-const wasmBytes = await readFile(wasmPath);
-await wasmModule.default(wasmBytes);
+const init = (wasmModule as { default?: (bytes: Uint8Array) => Promise<unknown> }).default;
+if (typeof init === 'function') {
+  await init(await readFile(wasmPath));
+}
 
 const { Database } = wasmModule;
 
@@ -146,6 +150,34 @@ describe('Real WASM: Snapshot export/import', () => {
   });
 });
 
+// tests/fixtures/snapshot-v4-wasm-0.5.42.bin was exported by @grafeo-db/wasm 0.5.42 after:
+//   INSERT (:Person {name: 'Alix', age: 30})-[:KNOWS {since: 2020}]->(:Person {name: 'Gus', age: 25})
+//   INSERT (:City {name: 'Utrecht', tags: ['a','b'], score: 1.5, ok: true})
+//   CREATE INDEX person_name FOR (p:Person) ON (p.name)
+//   INSERT DATA { <http://ex/a> <http://ex/knows> <http://ex/b> }   (SPARQL)
+// IndexedDB keeps such snapshots across upgrades, so a release must still load
+// them, or ship a deliberate migration and update this test.
+describe('Real WASM: snapshots persisted by earlier releases', () => {
+  it('imports a v4 snapshot exported by wasm 0.5.42', async () => {
+    const data = await readFile(resolve(__dirname, '../fixtures/snapshot-v4-wasm-0.5.42.bin'));
+    const db = Database.importSnapshot(new Uint8Array(data));
+
+    expect(db.nodeCount()).toBe(3);
+    expect(db.edgeCount()).toBe(1);
+    expect(db.execute('MATCH (a:Person)-[k:KNOWS]->(b) RETURN a.name, k.since, b.name')).toEqual([
+      { 'a.name': 'Alix', 'k.since': 2020, 'b.name': 'Gus' },
+    ]);
+    expect(db.execute('MATCH (c:City) RETURN c.name, c.tags, c.score, c.ok')).toEqual([
+      { 'c.name': 'Utrecht', 'c.tags': ['a', 'b'], 'c.score': 1.5, 'c.ok': true },
+    ]);
+    expect(db.executeWithLanguage('SELECT ?s ?o WHERE { ?s <http://ex/knows> ?o }', 'sparql')).toEqual([
+      { s: 'http://ex/a', o: 'http://ex/b' },
+    ]);
+
+    db.free();
+  });
+});
+
 describe('Real WASM: Unicode support (0.5.38)', () => {
   it('handles Unicode identifiers in GQL', () => {
     const db = new Database();
@@ -205,6 +237,41 @@ describe('Real WASM: Bulk import', () => {
     expect(result.edges).toBe(1);
     expect(db.nodeCount()).toBe(2);
     expect(db.edgeCount()).toBe(1);
+
+    db.free();
+  });
+
+  // 0.5.44: direct writes are checked like INSERT, so bulk imports throw on a
+  // constraint violation. Rows before the failing one stay written.
+  it('importRows rejects a row that violates a UNIQUE constraint (0.5.44)', () => {
+    const db = new Database();
+    db.execute('CREATE CONSTRAINT FOR (p:Person) ON (p.email) UNIQUE');
+
+    expect(() =>
+      db.importRows([{ email: 'a@x' }, { email: 'b@x' }, { email: 'a@x' }], {
+        mode: 'nodes',
+        label: 'Person',
+      }),
+    ).toThrow(/rows\[2\].*UNIQUE constraint violation/);
+    expect(db.nodeCount()).toBe(2);
+
+    db.free();
+  });
+
+  it('importLpg rejects a node that violates a UNIQUE constraint (0.5.44)', () => {
+    const db = new Database();
+    db.execute('CREATE CONSTRAINT FOR (p:Person) ON (p.email) UNIQUE');
+
+    expect(() =>
+      db.importLpg({
+        nodes: [
+          { labels: ['Person'], properties: { email: 'c@x' } },
+          { labels: ['Person'], properties: { email: 'c@x' } },
+        ],
+        edges: [],
+      }),
+    ).toThrow(/UNIQUE constraint violation/);
+    expect(db.nodeCount()).toBe(1);
 
     db.free();
   });

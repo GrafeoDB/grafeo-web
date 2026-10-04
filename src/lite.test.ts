@@ -496,6 +496,112 @@ describe('GrafeoDB (lite)', () => {
     });
   });
 
+  describe('schema()', () => {
+    it('returns schema information', async () => {
+      await db.execute("INSERT (:Person {name: 'Alice'})");
+      expect(await db.schema()).toEqual({
+        mode: 'lpg',
+        labels: [{ name: 'Person', count: 1 }],
+        edge_types: [],
+        property_keys: ['name'],
+      });
+    });
+  });
+
+  describe('storageStats()', () => {
+    it('returns zeros without persistence', async () => {
+      expect(await db.storageStats()).toEqual({ bytesUsed: 0, quota: 0 });
+    });
+
+    it('returns numeric stats with persistence', async () => {
+      const pdb = await GrafeoDB.create({ persist: 'lite-storage-stats' });
+      const stats = await pdb.storageStats();
+      expect(typeof stats.bytesUsed).toBe('number');
+      expect(typeof stats.quota).toBe('number');
+      await pdb.close();
+    });
+  });
+
+  describe('clear() with persistence', () => {
+    it('also removes the persisted snapshot', async () => {
+      const { PersistenceManager } = await import('./persistence');
+      const persist = 'lite-clear-persisted';
+      await new PersistenceManager(persist).clear();
+      try {
+        const first = await GrafeoDB.create({ persist });
+        await first.execute("INSERT (:Person {name: 'Alice'})");
+        await first.close();
+
+        const second = await GrafeoDB.create({ persist });
+        expect(await second.nodeCount()).toBe(1);
+        await second.clear();
+        await second.close();
+
+        const third = await GrafeoDB.create({ persist });
+        expect(await third.nodeCount()).toBe(0);
+        await third.close();
+      } finally {
+        await new PersistenceManager(persist).clear();
+      }
+    });
+  });
+
+  describe('persistence scheduling (every write path that saves)', () => {
+    const key = new Uint8Array(16).fill(7);
+
+    // `setup` runs before the spy is attached, so only `write` is measured.
+    // clear() deletes the stored snapshot instead (see 'clear() with persistence').
+    const writes: Array<{
+      name: string;
+      setup?: (d: GrafeoDBInstance) => Promise<unknown>;
+      write: (d: GrafeoDBInstance) => Promise<unknown>;
+    }> = [
+      { name: 'execute', write: (d) => d.execute("INSERT (:Person {name: 'Alix'})") },
+      { name: 'executeRaw', write: (d) => d.executeRaw("INSERT (:Person {name: 'Alix'})") },
+      { name: 'import', write: async (d) => d.import(await d.export()) },
+      { name: 'createProjection', write: (d) => d.createProjection('social', ['Person']) },
+      {
+        name: 'dropProjection',
+        setup: (d) => d.createProjection('social', ['Person']),
+        write: (d) => d.dropProjection('social'),
+      },
+      {
+        name: 'commitTransaction',
+        setup: async (d) => {
+          await d.beginTransaction();
+          await d.execute("INSERT (:Person {name: 'Alix'})");
+        },
+        write: (d) => d.commitTransaction(),
+      },
+      {
+        name: 'rollbackTransaction',
+        setup: async (d) => {
+          await d.beginTransaction();
+          await d.execute("INSERT (:Person {name: 'Alix'})");
+        },
+        write: (d) => d.rollbackTransaction(),
+      },
+      { name: 'signedImport', write: async (d) => d.signedImport(await d.signedExport(key), key) },
+    ];
+
+    it.each(writes)('$name schedules a save', async ({ name, setup, write }) => {
+      const persistKey = `lite-save-${name}`;
+      const pdb = await GrafeoDB.create({ persist: persistKey });
+      try {
+        await setup?.(pdb);
+        const persistence = (pdb as unknown as { persistence: { scheduleSave: () => void } }).persistence;
+        const saveSpy = vi.spyOn(persistence, 'scheduleSave');
+        await write(pdb);
+        expect(saveSpy).toHaveBeenCalledTimes(1);
+        saveSpy.mockRestore();
+      } finally {
+        await pdb.close();
+        const { PersistenceManager } = await import('./persistence');
+        await new PersistenceManager(persistKey).clear();
+      }
+    });
+  });
+
   describe('close()', () => {
     it('is idempotent', async () => {
       const instance = await GrafeoDB.create();

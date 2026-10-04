@@ -4,13 +4,53 @@ All notable changes to `@grafeo-db/web`.
 
 ## [0.5.44] - 2026-10-04
 
-_Align with Grafeo Core 0.5.44_
+Catches up on Grafeo Core 0.5.43 + 0.5.44. No new wrapper API. The engine's correctness and consistency fixes apply transparently; the visible changes are that bulk imports now enforce the schema and that some queries which used to return wrong results now fail with an error.
 
 ### Changed
 
-- **`@grafeo-db/wasm`**: updated to 0.5.44
-- **`@grafeo-db/wasm-lite`**: updated to 0.5.44
+- **`@grafeo-db/wasm`** and **`@grafeo-db/wasm-lite`**: updated to 0.5.44 and **pinned to that exact version** (was `^`). Grafeo Core 0.5.45 is due to replace the v4 snapshot format that IndexedDB persistence stores, and a caret range would let a fresh install of this release pick that up without upgrading `@grafeo-db/web`. Each release now depends on the exact wasm build it was tested against, matching the lockstep versioning.
+- **`importRows()` and `importLpg()` enforce the schema**: a row that breaks a constraint (e.g. a duplicate `UNIQUE` value) now throws, with the row named in the message (`rows[2]: ... UNIQUE constraint violation ...`). Previously it was written anyway. Rows before the failing one are kept. Via Core 0.5.44.
+- **Stricter queries, as in openCypher**: these now fail with an error instead of giving wrong or null results: an unnamed expression in `WITH`; a `CALL` subquery that reads an outer variable it does not import; `UNION` mixed with `UNION ALL`; a Cypher query that ends in a `CALL` subquery returning rows; and text after a statement, including `;`-separated statements (a trailing `;` is fine). Via Core 0.5.43 and 0.5.44.
+- **Unaliased columns are named after their expression**: `RETURN id(a), n.a + 1` yields the columns `id(a)` and `n.a + 1` (was `id(...)` and `expr`), and a result that would repeat a column name is an error asking for an alias. Via Core 0.5.43.
 
+### Fixed
+
+- **Integration tests ran against a `--target web` build only**: `tests/integration/wasm-real.test.ts` called the module's `default` init unconditionally, which the npm package (a `--target bundler` build) does not export. It now uses the same guard as `wasm-init.ts`.
+
+### Internal
+
+- **Integration tests run in CI** on Node 22, 24 and 25, against the real `@grafeo-db/wasm` and `@grafeo-db/wasm-lite` binaries. New: both wrappers (full and lite) on the real engine with IndexedDB persistence and reload, signed snapshots, transactions (including a failed statement inside one), the import constraint checks, and a v4 snapshot exported by wasm 0.5.42 that every release must still load.
+- **Unit tests assert what they name**: every write path that saves, in the full build, the lite build and the worker, is checked to schedule exactly one save (previously several such tests asserted nothing), and `clear()` to delete the stored snapshot instead; every worker method is checked to reach the worker under its own name with its arguments; every worker handler reports `Database not initialized` after close; and import errors reach the caller in direct and worker mode. A new test keeps the wasm dependencies pinned to the release's core version.
+- **Publishing uses npm trusted publishing** (OIDC, no token) and is started by the Release workflow, so a version bump merged to `main` reaches npm without a manual step.
+
+### Compatibility
+
+- **Persisted databases carry over**: the snapshot format is still v4. A snapshot exported by wasm 0.5.42 (nodes, edges, typed properties, a property index, RDF triples) imports into 0.5.44 unchanged.
+
+### Engine highlights (via Grafeo Core 0.5.43)
+
+- **GQL ran only the first statement**: `INSERT ... INSERT ...` created only the first node and `INSERT ... RETURN` ignored its `RETURN`; both now run in full
+- **GQL `^` (power)**: `RETURN 2 ^ 10` returned `2`; it now computes the power
+- **`ORDER BY ... LIMIT` over a whole-node `RETURN`** returned raw node IDs instead of node maps
+- **`UNION` with differing branches**: SPARQL returns every variable from every branch; GQL and Cypher reject branches with different columns
+- **SPARQL updates** now respect open transactions and named graphs, and `path+` returns the full transitive closure
+- **`=` and `<>` on dates, times, durations and vectors** were always false / true in expressions
+- **Gremlin negated text predicates**: `notRegex()`, `notContaining()`, `notStartingWith()`, `notEndingWith()`
+
+### Engine highlights (via Grafeo Core 0.5.44)
+
+- **Every write path checks the schema**: `SET`, `REMOVE`, `SET n:Label` and `MERGE` check property types, `NOT NULL`, `UNIQUE`, `NODE KEY` and `DEFAULT` like `INSERT`; parameterized queries are checked like the same query with literals; a missing parameter fails with `Missing parameter: $e` before anything is written
+- **Constraints are stored by name**: `DROP CONSTRAINT` works, `IF NOT EXISTS` / `IF EXISTS` are supported, and `SHOW CONSTRAINTS` lists them (unnamed ones get a name such as `Person_email_unique`)
+- **Transactions**: a failed statement inside a transaction is undone and the transaction goes on; a commit that fails on a write-write conflict no longer leaves the transaction active; commit and rollback cost only as much as the change
+- **Nodes and edges keep their kind through every clause**: after `ORDER BY`, `DISTINCT`, `UNION`, `collect()`, grouping and the like, they no longer come back as raw IDs, as `0`, or with another entity's properties
+- **`ORDER BY` uses the openCypher total order** across value types, and GQL `NULLS FIRST` / `NULLS LAST` are no longer reversed with `DESC`
+- **Paths**: a variable-length edge variable is the list of the path's edges; shortest-path searches respect hop bounds and skip unreachable pairs
+- **Subqueries**: `EXISTS`, `COUNT` and `VALUE` evaluate the whole pattern per row; `CALL` subqueries see the right outer variables, and the scope clause `CALL (a, b) { ... }` parses
+- **`MERGE` binds every match**, one row each, instead of only the first
+- **Faster lookups**: `id()` and indexed-property lookups seek directly instead of scanning, and regular expressions and `LIKE` patterns are compiled once per query
+- **Dotted access into map properties** (`n.meta.route`) and Cypher pattern predicates in `WHERE` (`WHERE (d)-[:CONTAINS]->()`)
+- **`REMOVE n.p` and `SET n.p = NULL` remove the property** instead of leaving it visible as null
+- Not exposed in WASM: the WAL and checkpoint durability fixes (no filesystem in the browser), graph handles, upserts by key and write counters
 
 ## [0.5.42] - 2026-05-05
 

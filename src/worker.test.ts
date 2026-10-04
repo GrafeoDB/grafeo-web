@@ -1,5 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+import { Database as MockDatabase } from './__mocks__/wasm';
+import { PersistenceManager } from './persistence';
 import type { WorkerRequest, WorkerResponse } from './types';
 
 // Mock the WASM module
@@ -158,6 +160,28 @@ describe('Worker message handler', () => {
       await send('clear', [], 3);
       const res = await send('nodeCount', [], 4);
       expect(res.result).toBe(0);
+    });
+
+    // clear deletes the stored snapshot instead of scheduling a save.
+    it('also removes the persisted snapshot', async () => {
+      const persist = 'worker-clear-persisted';
+      await new PersistenceManager(persist).clear();
+      try {
+        await send('init', [{ persist }]);
+        await send('execute', ["INSERT (:Person {name: 'Alice'})"]);
+        await send('close');
+
+        await send('init', [{ persist }]);
+        expect((await send('nodeCount')).result).toBe(1);
+        await send('clear');
+        await send('close');
+
+        await send('init', [{ persist }]);
+        expect((await send('nodeCount')).result).toBe(0);
+      } finally {
+        await send('close');
+        await new PersistenceManager(persist).clear();
+      }
     });
   });
 
@@ -513,6 +537,191 @@ describe('Worker message handler', () => {
       expect(res.error).toBe('Database not initialized');
       const res2 = await send('signedImport', [new Uint8Array([0]), key], 342);
       expect(res2.error).toBe('Database not initialized');
+    });
+  });
+
+  describe('bulk import', () => {
+    it('importRows returns the row count', async () => {
+      const res = await send('importRows', [[{ name: 'Alix' }, { name: 'Gus' }], { mode: 'nodes', label: 'Person' }]);
+      expect(res.error).toBeUndefined();
+      expect(res.result).toBe(2);
+    });
+
+    it('importLpg returns node and edge counts', async () => {
+      const res = await send('importLpg', [
+        {
+          nodes: [{ labels: ['Person'] }, { labels: ['Person'] }],
+          edges: [{ source: 0, target: 1, type: 'KNOWS' }],
+        },
+      ]);
+      expect(res.error).toBeUndefined();
+      expect(res.result).toEqual({ nodes: 2, edges: 1 });
+    });
+
+    it('importRdf returns the triple count', async () => {
+      const res = await send('importRdf', [
+        { triples: [{ subject: 'http://ex/a', predicate: 'http://ex/p', object: 'http://ex/b' }] },
+      ]);
+      expect(res.error).toBeUndefined();
+      expect(res.result).toEqual({ triples: 1 });
+    });
+
+    // 0.5.44: direct writes are checked like INSERT, so the engine throws on a
+    // row that breaks a constraint, naming the row.
+    it('importRows reports the engine error and keeps the worker usable', async () => {
+      const spy = vi.spyOn(MockDatabase.prototype, 'importRows').mockImplementationOnce(() => {
+        throw new Error('rows[2]: GRAFEO-V001: Invalid value: UNIQUE constraint violation');
+      });
+      const res = await send('importRows', [[{ email: 'a' }], { mode: 'nodes', label: 'Person' }]);
+      spy.mockRestore();
+      expect(res.error).toMatch(/rows\[2\].*UNIQUE constraint violation/);
+
+      const next = await send('nodeCount');
+      expect(next.error).toBeUndefined();
+    });
+
+    it('importLpg reports an out-of-bounds edge index', async () => {
+      const res = await send('importLpg', [
+        { nodes: [{ labels: ['Person'] }], edges: [{ source: 0, target: 5, type: 'KNOWS' }] },
+      ]);
+      expect(res.error).toBe('edges[0].target index 5 out of bounds (0..1)');
+    });
+
+    it('importRdf reports a missing rdf feature', async () => {
+      const original = MockDatabase.prototype.importRdf;
+      Object.defineProperty(MockDatabase.prototype, 'importRdf', { value: undefined, configurable: true, writable: true });
+      try {
+        const res = await send('importRdf', [{ triples: [] }]);
+        expect(res.error).toBe("importRdf() requires @grafeo-db/wasm built with the 'rdf' feature");
+      } finally {
+        Object.defineProperty(MockDatabase.prototype, 'importRdf', { value: original, configurable: true, writable: true });
+      }
+    });
+  });
+
+  describe('vector index', () => {
+    it('creates, searches, rebuilds and drops an index', async () => {
+      const query = new Float32Array([1, 0, 0]);
+      expect((await send('createVectorIndex', ['Doc', 'embedding', { dimensions: 3 }])).error).toBeUndefined();
+
+      const knn = await send('vectorSearch', ['Doc', 'embedding', query, 5]);
+      expect(knn.error).toBeUndefined();
+      expect(Array.isArray(knn.result)).toBe(true);
+
+      const mmr = await send('mmrSearch', ['Doc', 'embedding', query, 5, { lambda: 0.5 }]);
+      expect(mmr.error).toBeUndefined();
+      expect(Array.isArray(mmr.result)).toBe(true);
+
+      expect((await send('rebuildVectorIndex', ['Doc', 'embedding'])).error).toBeUndefined();
+      const dropped = await send('dropVectorIndex', ['Doc', 'embedding']);
+      expect(dropped.error).toBeUndefined();
+      expect(typeof dropped.result).toBe('boolean');
+    });
+  });
+
+  describe('schema context', () => {
+    it('sets, reads and resets the current schema', async () => {
+      expect((await send('setSchema', ['tenant_a'])).error).toBeUndefined();
+      expect((await send('currentSchema')).result).toBe('tenant_a');
+      expect((await send('resetSchema')).error).toBeUndefined();
+      expect((await send('currentSchema')).result).toBeUndefined();
+    });
+  });
+
+  describe('introspection', () => {
+    it('memoryUsage returns a breakdown', async () => {
+      const res = await send('memoryUsage');
+      expect(res.error).toBeUndefined();
+      expect(res.result).toHaveProperty('total_bytes');
+    });
+
+    it('info returns database metadata', async () => {
+      const res = await send('info');
+      expect(res.error).toBeUndefined();
+      expect(res.result).toHaveProperty('version');
+    });
+
+    it('clearPlanCache succeeds', async () => {
+      expect((await send('clearPlanCache')).error).toBeUndefined();
+    });
+  });
+
+  describe('persistence scheduling (every write path that saves)', () => {
+    const key = new Uint8Array(16).fill(7);
+
+    // `setup` messages run before the spy is attached, so only the write is
+    // measured. `args` may be computed from the database (export, signedExport).
+    // clear deletes the stored snapshot instead (see 'clear').
+    const writes: Array<{
+      method: string;
+      setup?: Array<[string, unknown[]]>;
+      args?: unknown[] | (() => Promise<unknown[]>);
+    }> = [
+      { method: 'execute', args: ["INSERT (:Person {name: 'Alix'})"] },
+      { method: 'executeRaw', args: ["INSERT (:Person {name: 'Alix'})"] },
+      { method: 'import', args: async () => [(await send('export')).result] },
+      { method: 'createTextIndex', args: ['Person', 'name'] },
+      { method: 'dropTextIndex', args: ['Person', 'name'] },
+      { method: 'rebuildTextIndex', args: ['Person', 'name'] },
+      { method: 'createVectorIndex', args: ['Doc', 'embedding'] },
+      { method: 'dropVectorIndex', args: ['Doc', 'embedding'] },
+      { method: 'rebuildVectorIndex', args: ['Doc', 'embedding'] },
+      { method: 'createProjection', args: ['social', ['Person']] },
+      { method: 'dropProjection', setup: [['createProjection', ['social', ['Person']]]], args: ['social'] },
+      { method: 'compact' },
+      { method: 'importRows', args: [[{ name: 'Alix' }], { mode: 'nodes', label: 'Person' }] },
+      { method: 'importLpg', args: [{ nodes: [{ labels: ['Person'] }], edges: [] }] },
+      {
+        method: 'importRdf',
+        args: [{ triples: [{ subject: 'http://ex/a', predicate: 'http://ex/p', object: 'http://ex/b' }] }],
+      },
+      {
+        method: 'commitTransaction',
+        setup: [['beginTransaction', []], ['execute', ["INSERT (:Person {name: 'Alix'})"]]],
+      },
+      {
+        method: 'rollbackTransaction',
+        setup: [['beginTransaction', []], ['execute', ["INSERT (:Person {name: 'Alix'})"]]],
+      },
+      { method: 'signedImport', args: async () => [(await send('signedExport', [key])).result, key] },
+    ];
+
+    it.each(writes)('$method schedules a save', async ({ method, setup = [], args = [] }) => {
+      const persistKey = `worker-save-${method}`;
+      await send('init', [{ persist: persistKey }]);
+      for (const [m, a] of setup) {
+        expect((await send(m, a)).error).toBeUndefined();
+      }
+      const resolvedArgs = typeof args === 'function' ? await args() : args;
+
+      const saveSpy = vi.spyOn(PersistenceManager.prototype, 'scheduleSave');
+      try {
+        const res = await send(method, resolvedArgs);
+        expect(res.error).toBeUndefined();
+        expect(saveSpy).toHaveBeenCalledTimes(1);
+      } finally {
+        saveSpy.mockRestore();
+        await send('close');
+        await new PersistenceManager(persistKey).clear();
+      }
+    });
+  });
+
+  describe('uninitialized database', () => {
+    const methods = [
+      'execute', 'executeRaw', 'nodeCount', 'edgeCount', 'export', 'import', 'schema', 'clear',
+      'createTextIndex', 'dropTextIndex', 'rebuildTextIndex', 'textSearch', 'hybridSearch',
+      'createVectorIndex', 'dropVectorIndex', 'rebuildVectorIndex', 'vectorSearch', 'mmrSearch',
+      'createProjection', 'dropProjection', 'listProjections', 'setSchema', 'resetSchema',
+      'currentSchema', 'compact', 'clearPlanCache', 'memoryUsage', 'info', 'importRows',
+      'importLpg', 'importRdf', 'beginTransaction', 'commitTransaction', 'rollbackTransaction',
+      'isTransactionActive', 'signedExport', 'signedImport',
+    ];
+
+    it.each(methods)('%s reports "Database not initialized" after close', async (method) => {
+      await send('close');
+      const res = await send(method, []);
+      expect(res.error).toBe('Database not initialized');
     });
   });
 

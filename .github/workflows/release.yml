@@ -7,6 +7,7 @@ on:
 
 permissions:
   contents: write
+  actions: write
 
 jobs:
   release:
@@ -57,3 +58,12 @@ jobs:
           gh release create "$TAG" \
             --title "Release ${VERSION}" \
             --notes-file /tmp/release-body.txt
+
+      # A release created with GITHUB_TOKEN does not fire the `release` event,
+      # but a workflow_dispatch from it does.
+      - name: Trigger npm publish
+        if: steps.version.outputs.changed == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERSION: ${{ steps.version.outputs.new }}
+        run: gh workflow run publish.yml --ref "v${VERSION}"
