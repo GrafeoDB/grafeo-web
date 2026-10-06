@@ -3,8 +3,7 @@ name: Publish
 on:
   release:
     types: [published]
-  # Release.yml dispatches this: a release it creates with GITHUB_TOKEN does not
-  # fire the `release` event. Also usable by hand.
+  # By hand, to re-run a publish on the release tag.
   workflow_dispatch:
 
 jobs:
@@ -26,9 +25,9 @@ jobs:
           cache: 'npm'
           registry-url: 'https://registry.npmjs.org'
 
-      # Publish only from this version's release tag: the release event and the
-      # dispatch from release.yml both run on refs/tags/v<version>. A manual run
-      # from a branch, or from a tag that does not match package.json, stops.
+      # Publish only from this version's release tag: the release event runs on
+      # refs/tags/v<version>. A manual run from a branch, or from a tag that does
+      # not match package.json, stops.
       - name: Check the ref is this version's release tag
         run: |
           VERSION=$(node -p "require('./package.json').version")

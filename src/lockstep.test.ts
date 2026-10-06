@@ -6,10 +6,10 @@ const readJson = (rel: string) => JSON.parse(readFileSync(new URL(rel, import.me
 const pkg = readJson('../package.json');
 const lock = readJson('../package-lock.json');
 
-// grafeo-web ships in lockstep with grafeo: each release depends on exactly the
-// wasm build it was tested against. A caret range (what `npm install --save`
-// writes) lets a fresh install pull the next engine release, and with it a new
-// snapshot format for IndexedDB, without a web upgrade.
+// grafeo-web ships in lockstep with grafeo, version for version: each release
+// depends on exactly the wasm build it was tested against. A caret range (what
+// `npm install --save` writes) lets a fresh install pull a newer engine build
+// than the one this release was tested with.
 describe('lockstep wasm dependencies', () => {
   const wasmDeps = ['@grafeo-db/wasm', '@grafeo-db/wasm-lite'];
   // A web-only hotfix (0.5.40-hotfix.1) still ships on its core release.
