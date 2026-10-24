@@ -619,3 +619,55 @@ describe('GrafeoDB (lite)', () => {
     });
   });
 });
+
+describe('GrafeoDB (lite) on the 0.6 engine API', () => {
+  it('getNodeEdges() passes the ID and options on and returns the pairs', async () => {
+    const db = await GrafeoDB.create();
+    const wasm = (db as unknown as { wasm: Record<string, (...a: unknown[]) => unknown> }).wasm;
+    const spy = vi.spyOn(wasm, 'getNodeEdges').mockReturnValue([[1, 0]]);
+    expect(await db.getNodeEdges(0, { direction: 'both', edgeTypes: ['KNOWS'] })).toEqual([[1, 0]]);
+    expect(spy).toHaveBeenCalledWith(0, { direction: 'both', edgeTypes: ['KNOWS'] });
+    await db.close();
+  });
+
+  it('executeRaw() binds params through executeRawWithParams', async () => {
+    const db = await GrafeoDB.create();
+    const wasm = (db as unknown as { wasm: Record<string, (...a: unknown[]) => unknown> }).wasm;
+    const spy = vi.spyOn(wasm, 'executeRawWithParams');
+    await db.executeRaw('MATCH (p:Person {name: $name}) RETURN p.name', { params: { name: 'Alix' } });
+    expect(spy).toHaveBeenCalledWith('MATCH (p:Person {name: $name}) RETURN p.name', { name: 'Alix' });
+    await db.close();
+  });
+
+  it('compact() returns the engine report and schedules a save', async () => {
+    const { PersistenceManager } = await import('./persistence');
+    const db = await GrafeoDB.create({ persist: 'lite-compact' });
+    const saveSpy = vi.spyOn(PersistenceManager.prototype, 'scheduleSave');
+    try {
+      await expect(db.compact()).resolves.toEqual({
+        checkpointed: false,
+        versions_collected: 0,
+        rows_compressed: 0,
+        duration_ms: 0,
+      });
+      expect(saveSpy).toHaveBeenCalledTimes(1);
+    } finally {
+      saveSpy.mockRestore();
+      await db.clear();
+      await db.close();
+    }
+  });
+
+  it('compact() is refused on an engine whose compact() panics', async () => {
+    const { Database } = await import('./__mocks__/wasm');
+    const versionSpy = vi.spyOn(Database, 'version').mockReturnValue('0.6.0-beta.1');
+    const db = await GrafeoDB.create();
+    try {
+      await expect(db.compact()).rejects.toThrow('compact() is not available with Grafeo 0.6.0-beta.1');
+      expect(await db.nodeCount()).toBe(0);
+    } finally {
+      versionSpy.mockRestore();
+      await db.close();
+    }
+  });
+});

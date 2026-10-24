@@ -1,4 +1,6 @@
 import type {
+  BatchEdge,
+  CompactReport,
   CreateOptions,
   DatabaseInfo,
   DatabaseSnapshot,
@@ -8,12 +10,19 @@ import type {
   LpgImportResult,
   MemoryUsage,
   MmrSearchOptions,
+  NodeEdge,
+  NodeEdgesOptions,
   RawQueryResult,
   RdfImportData,
   RdfImportResult,
   SchemaInfo,
   SearchResult,
   StorageStats,
+  TextIndexOptions,
+  TextSearchOptions,
+  UpsertEdgesOptions,
+  UpsertNodesOptions,
+  UpsertSummary,
   VectorIndexOptions,
   VectorResult,
   VectorSearchOptions,
@@ -53,25 +62,30 @@ export class WorkerProxy {
       // Use pre-created Worker (bundler-friendly: caller handles URL resolution)
       this.worker = options.worker;
     } else {
-      // Auto-create Worker, resolving URL relative to this module.
-      // Note: import.meta.url is only available in ESM.
-      const workerUrl = new URL(
-        './worker.js',
+      // Auto-create the Worker from dist/worker.js next to this module. Kept as
+      // one `new Worker(new URL(..., import.meta.url))` expression, the form
+      // bundlers (Vite, webpack 5) detect and bundle. import.meta.url is ESM-only.
+      this.worker = new Worker(
         // eslint-disable-next-line @typescript-eslint/ban-ts-comment
-        // @ts-ignore -- import.meta.url is ESM-only; CJS build warns but worker is ESM-first
-        import.meta.url,
+        // @ts-ignore: import.meta.url is ESM-only; the CJS build warns, the worker is ESM-first
+        new URL('./worker.js', import.meta.url),
+        { type: 'module' },
       );
-      this.worker = new Worker(workerUrl, { type: 'module' });
     }
 
     this.worker.onmessage = (event: MessageEvent<WorkerResponse>) => {
-      const { id, result, error } = event.data;
+      const { id, result, error, errorInfo } = event.data;
       const request = this.pending.get(id);
       if (!request) return;
 
       this.pending.delete(id);
       if (error !== undefined) {
-        request.reject(new Error(error));
+        const err = new Error(error);
+        if (errorInfo?.name) err.name = errorInfo.name;
+        if (errorInfo?.gqlStatus) {
+          (err as Error & { gqlStatus?: string }).gqlStatus = errorInfo.gqlStatus;
+        }
+        request.reject(err);
       } else {
         request.resolve(result);
       }
@@ -123,7 +137,7 @@ export class WorkerProxy {
     >[];
   }
 
-  async executeRaw(query: string, options?: Pick<ExecuteOptions, 'language'>): Promise<RawQueryResult> {
+  async executeRaw(query: string, options?: ExecuteOptions): Promise<RawQueryResult> {
     return (await this.send('executeRaw', [query, options])) as RawQueryResult;
   }
 
@@ -133,6 +147,10 @@ export class WorkerProxy {
 
   async edgeCount(): Promise<number> {
     return (await this.send('edgeCount')) as number;
+  }
+
+  async getNodeEdges(id: number, options?: NodeEdgesOptions): Promise<NodeEdge[]> {
+    return (await this.send('getNodeEdges', [id, options])) as NodeEdge[];
   }
 
   async schema(): Promise<SchemaInfo> {
@@ -155,8 +173,8 @@ export class WorkerProxy {
     await this.send('clear');
   }
 
-  async createTextIndex(label: string, property: string): Promise<void> {
-    await this.send('createTextIndex', [label, property]);
+  async createTextIndex(label: string, property: string, options?: TextIndexOptions): Promise<void> {
+    await this.send('createTextIndex', [label, property, options]);
   }
 
   async dropTextIndex(label: string, property: string): Promise<boolean> {
@@ -172,8 +190,9 @@ export class WorkerProxy {
     property: string,
     query: string,
     k: number,
+    options?: TextSearchOptions,
   ): Promise<SearchResult[]> {
-    return (await this.send('textSearch', [label, property, query, k])) as SearchResult[];
+    return (await this.send('textSearch', [label, property, query, k, options])) as SearchResult[];
   }
 
   async hybridSearch(
@@ -182,8 +201,9 @@ export class WorkerProxy {
     vectorProp: string,
     queryText: string,
     k: number,
+    options?: TextSearchOptions,
   ): Promise<SearchResult[]> {
-    return (await this.send('hybridSearch', [label, textProp, vectorProp, queryText, k])) as SearchResult[];
+    return (await this.send('hybridSearch', [label, textProp, vectorProp, queryText, k, options])) as SearchResult[];
   }
 
   async createVectorIndex(label: string, property: string, options?: VectorIndexOptions): Promise<void> {
@@ -218,6 +238,16 @@ export class WorkerProxy {
     return (await this.send('mmrSearch', [label, property, query, k, options])) as VectorResult[];
   }
 
+  async batchVectorSearch(
+    label: string,
+    property: string,
+    queries: (Float32Array | number[])[],
+    k: number,
+    options?: VectorSearchOptions,
+  ): Promise<VectorResult[][]> {
+    return (await this.send('batchVectorSearch', [label, property, queries, k, options])) as VectorResult[][];
+  }
+
   async createProjection(name: string, nodeLabels?: string[], edgeTypes?: string[]): Promise<boolean> {
     return (await this.send('createProjection', [name, nodeLabels, edgeTypes])) as boolean;
   }
@@ -242,8 +272,8 @@ export class WorkerProxy {
     return (await this.send('currentSchema')) as string | undefined;
   }
 
-  async compact(): Promise<void> {
-    await this.send('compact');
+  async compact(): Promise<CompactReport> {
+    return (await this.send('compact')) as CompactReport;
   }
 
   async clearPlanCache(): Promise<void> {
@@ -268,6 +298,30 @@ export class WorkerProxy {
 
   async importRdf(data: RdfImportData): Promise<RdfImportResult> {
     return (await this.send('importRdf', [data])) as RdfImportResult;
+  }
+
+  async batchCreateNodesWithProps(labels: string | string[], rows: Record<string, unknown>[]): Promise<number[]> {
+    return (await this.send('batchCreateNodesWithProps', [labels, rows])) as number[];
+  }
+
+  async batchCreateEdges(edges: BatchEdge[]): Promise<number[]> {
+    return (await this.send('batchCreateEdges', [edges])) as number[];
+  }
+
+  async upsertNodes(
+    labels: string | string[],
+    rows: Record<string, unknown>[],
+    options?: UpsertNodesOptions,
+  ): Promise<UpsertSummary> {
+    return (await this.send('upsertNodes', [labels, rows, options])) as UpsertSummary;
+  }
+
+  async upsertEdges(
+    edgeType: string,
+    rows: Record<string, unknown>[],
+    options?: UpsertEdgesOptions,
+  ): Promise<UpsertSummary> {
+    return (await this.send('upsertEdges', [edgeType, rows, options])) as UpsertSummary;
   }
 
   async beginTransaction(): Promise<void> {

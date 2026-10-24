@@ -1,6 +1,6 @@
 {
   "name": "@grafeo-db/web",
-  "version": "0.5.44",
+  "version": "0.6.0",
   "description": "Grafeo graph database in the browser - WebAssembly powered, zero backend",
   "keywords": [
     "grafeo",
@@ -79,6 +79,16 @@
         "default": "./dist/svelte.cjs"
       }
     },
+    "./worker-client": {
+      "import": {
+        "types": "./dist/worker-client.d.ts",
+        "default": "./dist/worker-client.js"
+      },
+      "require": {
+        "types": "./dist/worker-client.d.cts",
+        "default": "./dist/worker-client.cjs"
+      }
+    },
     "./worker-src": "./dist/worker.js"
   },
   "main": "./dist/index.cjs",
@@ -97,8 +107,8 @@
     "prepublishOnly": "npm run build"
   },
   "dependencies": {
-    "@grafeo-db/wasm": "0.5.44",
-    "@grafeo-db/wasm-lite": "0.5.44"
+    "@grafeo-db/wasm": "0.6.0",
+    "@grafeo-db/wasm-lite": "0.6.0"
   },
   "peerDependencies": {
     "react": ">=19",
@@ -117,18 +127,18 @@
     }
   },
   "devDependencies": {
-    "@types/react": "^19.2.13",
-    "@types/react-dom": "^19.2.3",
-    "@vitest/coverage-v8": "^4.1.2",
-    "fake-indexeddb": "^6.2.5",
-    "happy-dom": "^20.8.9",
-    "react": "^19.2.4",
-    "react-dom": "^19.2.4",
-    "svelte": "^5.50.0",
-    "tsup": "^8.0.0",
-    "typescript": "^5.8.0",
-    "vitest": "^4.1.2",
-    "vue": "^3.5.27"
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0",
+    "@vitest/coverage-v8": "^4.1.12",
+    "fake-indexeddb": "^6.2.6",
+    "happy-dom": "^20.14.6",
+    "react": "^19.3.1",
+    "react-dom": "^19.3.1",
+    "svelte": "^5.57.2",
+    "tsup": "^8.5.1",
+    "typescript": "^5.9.3",
+    "vitest": "^4.1.12",
+    "vue": "^3.5.44"
   },
   "engines": {
     "node": ">=22"

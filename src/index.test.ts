@@ -504,13 +504,18 @@ describe('GrafeoDB', () => {
   });
 
   describe('compact()', () => {
-    it('does not throw', async () => {
-      await expect(db.compact()).resolves.toBeUndefined();
+    it('returns the engine report', async () => {
+      await expect(db.compact()).resolves.toEqual({
+        checkpointed: false,
+        versions_collected: 0,
+        rows_compressed: 0,
+        duration_ms: 0,
+      });
     });
 
     it('triggers persistence when persisted', async () => {
       const pdb = await GrafeoDB.create({ persist: 'compact-test' });
-      await expect(pdb.compact()).resolves.toBeUndefined();
+      await expect(pdb.compact()).resolves.toMatchObject({ checkpointed: false });
       await pdb.close();
     });
 
@@ -520,16 +525,79 @@ describe('GrafeoDB', () => {
       await expect(instance.compact()).rejects.toThrow('Database is closed');
     });
 
-    it('throws when feature missing', async () => {
+    // Grafeo 0.6.0-beta.1 panics in compact() (it reads the system clock, which
+    // wasm32 lacks) and the panic leaves the Database unusable.
+    it('refuses on an engine whose compact() panics, and the database stays usable', async () => {
+      const { Database } = await import('./__mocks__/wasm');
+      const versionSpy = vi.spyOn(Database, 'version').mockReturnValue('0.6.0-beta.1');
       const instance = await GrafeoDB.create();
-      const wasm = (instance as unknown as { wasm: Record<string, unknown> }).wasm;
-      Object.defineProperty(wasm, 'compact', { value: undefined, configurable: true });
+      const wasm = (instance as unknown as { wasm: { compact: () => unknown } }).wasm;
+      const compactSpy = vi.spyOn(wasm, 'compact');
+      try {
+        await expect(instance.compact()).rejects.toThrow(
+          'compact() is not available with Grafeo 0.6.0-beta.1',
+        );
+        expect(compactSpy).not.toHaveBeenCalled();
+        await instance.execute("INSERT (:Person {name: 'Alix'})");
+        expect(await instance.nodeCount()).toBe(1);
+      } finally {
+        versionSpy.mockRestore();
+        await instance.close();
+      }
+    });
+  });
 
-      await expect(instance.compact()).rejects.toThrow(
-        "compact() requires @grafeo-db/wasm built with the 'compact-store' feature",
-      );
+  describe('executeRaw() with params', () => {
+    it('dispatches to executeRawWithParams', async () => {
+      const wasm = (db as unknown as { wasm: Record<string, (...a: unknown[]) => unknown> }).wasm;
+      const spy = vi.spyOn(wasm, 'executeRawWithParams');
+      await db.executeRaw('MATCH (p:Person) RETURN p.name', { params: { name: 'Alix' } });
+      expect(spy).toHaveBeenCalledWith('MATCH (p:Person) RETURN p.name', { name: 'Alix' });
+    });
 
-      await instance.close();
+    it('dispatches to executeRawWithLanguageAndParams', async () => {
+      const wasm = (db as unknown as { wasm: Record<string, (...a: unknown[]) => unknown> }).wasm;
+      const spy = vi.spyOn(wasm, 'executeRawWithLanguageAndParams');
+      await db.executeRaw('MATCH (p:Person) RETURN p.name', {
+        language: 'cypher',
+        params: { name: 'Alix' },
+      });
+      expect(spy).toHaveBeenCalledWith('MATCH (p:Person) RETURN p.name', 'cypher', { name: 'Alix' });
+    });
+
+    it('treats gql with params as plain GQL', async () => {
+      const wasm = (db as unknown as { wasm: Record<string, (...a: unknown[]) => unknown> }).wasm;
+      const spy = vi.spyOn(wasm, 'executeRawWithParams');
+      await db.executeRaw('MATCH (n) RETURN n', { language: 'gql', params: { x: 1 } });
+      expect(spy).toHaveBeenCalledWith('MATCH (n) RETURN n', { x: 1 });
+    });
+  });
+
+  describe('text index options and search filters', () => {
+    it('passes text index options and search filters to the engine', async () => {
+      const wasm = (db as unknown as { wasm: Record<string, (...a: unknown[]) => unknown> }).wasm;
+      const create = vi.spyOn(wasm, 'createTextIndex');
+      const text = vi.spyOn(wasm, 'textSearch');
+      const hybrid = vi.spyOn(wasm, 'hybridSearch');
+
+      await db.createTextIndex('Doc', 'body', { tokenizer: 'cjk_bigram', k1: 1.5 });
+      await db.textSearch('Doc', 'body', 'graph', 5, { filters: { city: 'Berlin' } });
+      await db.hybridSearch('Doc', 'body', 'emb', 'graph', 5, { filters: { rank: { $gt: 19 } } });
+
+      expect(create).toHaveBeenCalledWith('Doc', 'body', { tokenizer: 'cjk_bigram', k1: 1.5 });
+      expect(text).toHaveBeenCalledWith('Doc', 'body', 'graph', 5, { filters: { city: 'Berlin' } });
+      expect(hybrid).toHaveBeenCalledWith('Doc', 'body', 'emb', 'graph', 5, {
+        filters: { rank: { $gt: 19 } },
+      });
+    });
+  });
+
+  describe('query languages', () => {
+    it.each(['graphql-rdf', 'sql-pgq'] as const)('accepts %s', async (language) => {
+      const wasm = (db as unknown as { wasm: Record<string, (...a: unknown[]) => unknown> }).wasm;
+      const spy = vi.spyOn(wasm, 'executeWithLanguage');
+      await db.execute('MATCH (n) RETURN n', { language });
+      expect(spy).toHaveBeenCalledWith('MATCH (n) RETURN n', language);
     });
   });
 
@@ -680,6 +748,87 @@ describe('GrafeoDB', () => {
         instance.importRdf({ triples: [] }),
       ).rejects.toThrow("importRdf() requires @grafeo-db/wasm built with the 'rdf' feature");
 
+      await instance.close();
+    });
+  });
+
+  describe('batch writes and upserts (0.6)', () => {
+    it('batchCreateNodesWithProps returns the node IDs in row order', async () => {
+      expect(await db.batchCreateNodesWithProps('Person', [{ name: 'Alix' }, { name: 'Gus' }])).toEqual([0, 1]);
+      expect(await db.nodeCount()).toBe(2);
+    });
+
+    it('batchCreateEdges returns the edge IDs and refuses a missing node', async () => {
+      await db.batchCreateNodesWithProps(['Person'], [{ name: 'Alix' }, { name: 'Gus' }]);
+      expect(await db.batchCreateEdges([{ src: 0, dst: 1, type: 'KNOWS', properties: { since: 2020 } }])).toEqual([0]);
+      await expect(db.batchCreateEdges([{ src: 0, dst: 9, type: 'KNOWS' }])).rejects.toThrow(/Node not found: 9/);
+      expect(await db.edgeCount()).toBe(1);
+    });
+
+    it('batch writes throw while a transaction is open', async () => {
+      await db.beginTransaction();
+      await expect(db.batchCreateNodesWithProps('Person', [{}])).rejects.toThrow(/commits on its own/);
+      await expect(db.batchCreateEdges([])).rejects.toThrow(/commits on its own/);
+      await db.rollbackTransaction();
+    });
+
+    it('upsertNodes returns its summary', async () => {
+      await db.upsertNodes('File', [{ path: 'a.rs', size: 1 }], { key: 'path' });
+      expect(
+        await db.upsertNodes('File', [{ path: 'a.rs', size: 3 }, { path: 'b.rs' }, { size: 0 }], { key: 'path' }),
+      ).toEqual({ created: 1, updated: 1, skipped: 1, skippedRows: [2] });
+    });
+
+    it('upsertEdges passes the rows and options on', async () => {
+      const wasm = (db as unknown as { wasm: { upsertEdges: (...a: unknown[]) => unknown } }).wasm;
+      const spy = vi.spyOn(wasm, 'upsertEdges');
+      const options = { key: 'id', endpointKey: 'path', endpointLabels: ['File'] };
+      await db.upsertEdges('IMPORTS', [{ id: 'e1', src: 'a.rs', dst: 'b.rs' }], options);
+      expect(spy).toHaveBeenCalledWith('IMPORTS', [{ id: 'e1', src: 'a.rs', dst: 'b.rs' }], options);
+    });
+
+    it.each(['batchCreateNodesWithProps', 'batchCreateEdges', 'upsertNodes', 'upsertEdges'] as const)(
+      '%s throws when the direct-api feature is missing',
+      async (method) => {
+        const instance = await GrafeoDB.create();
+        const wasm = (instance as unknown as { wasm: Record<string, unknown> }).wasm;
+        Object.defineProperty(wasm, method, { value: undefined, configurable: true });
+        const call = instance[method] as (...args: unknown[]) => Promise<unknown>;
+        await expect(call.call(instance, 'X', [])).rejects.toThrow(
+          `${method}() requires @grafeo-db/wasm built with the 'direct-api' feature`,
+        );
+        await instance.close();
+      },
+    );
+  });
+
+  describe('getNodeEdges() (0.6)', () => {
+    it('lists [neighborId, edgeId] pairs by direction and type', async () => {
+      await db.batchCreateNodesWithProps('Person', [{ name: 'Alix' }, { name: 'Gus' }]);
+      await db.batchCreateEdges([
+        { src: 0, dst: 1, type: 'KNOWS' },
+        { src: 1, dst: 0, type: 'LIKES' },
+      ]);
+      expect(await db.getNodeEdges(0)).toEqual([[1, 0]]);
+      expect(await db.getNodeEdges(0, { direction: 'both' })).toEqual([[1, 0], [1, 1]]);
+      expect(await db.getNodeEdges(0, { direction: 'in', edgeTypes: ['LIKES'] })).toEqual([[1, 1]]);
+      expect(await db.getNodeEdges(42)).toEqual([]);
+    });
+  });
+
+  describe('batchVectorSearch() (0.6)', () => {
+    it('returns one result list per query', async () => {
+      const results = await db.batchVectorSearch('Doc', 'emb', [new Float32Array([1, 0]), [0, 1]], 3);
+      expect(results).toHaveLength(2);
+    });
+
+    it('throws when the vector-index feature is missing', async () => {
+      const instance = await GrafeoDB.create();
+      const wasm = (instance as unknown as { wasm: Record<string, unknown> }).wasm;
+      Object.defineProperty(wasm, 'batchVectorSearch', { value: undefined, configurable: true });
+      await expect(instance.batchVectorSearch('Doc', 'emb', [[1, 0]], 3)).rejects.toThrow(
+        "batchVectorSearch() requires @grafeo-db/wasm built with the 'vector-index' feature",
+      );
       await instance.close();
     });
   });
@@ -1011,6 +1160,14 @@ describe('GrafeoDB', () => {
         write: (d) =>
           d.importRdf({ triples: [{ subject: 'http://ex/a', predicate: 'http://ex/p', object: 'http://ex/b' }] }),
       },
+      { name: 'batchCreateNodesWithProps', write: (d) => d.batchCreateNodesWithProps('Person', [{ name: 'Alix' }]) },
+      {
+        name: 'batchCreateEdges',
+        setup: (d) => d.batchCreateNodesWithProps('Person', [{}, {}]),
+        write: (d) => d.batchCreateEdges([{ src: 0, dst: 1, type: 'KNOWS' }]),
+      },
+      { name: 'upsertNodes', write: (d) => d.upsertNodes('Person', [{ id: 'a' }]) },
+      { name: 'upsertEdges', write: (d) => d.upsertEdges('KNOWS', [{ id: 'e', src: 'a', dst: 'b' }]) },
       {
         name: 'commitTransaction',
         setup: async (d) => {
@@ -1522,6 +1679,42 @@ describe('GrafeoDB (worker mode)', () => {
       call: (d) => d.mmrSearch('Doc', 'embedding', queryVector, 3),
       args: ['Doc', 'embedding', queryVector, 3, undefined],
       result: [{ id: 1, distance: 0.1 }],
+    },
+    {
+      method: 'batchVectorSearch',
+      call: (d) => d.batchVectorSearch('Doc', 'embedding', [queryVector], 3, { ef: 50 }),
+      args: ['Doc', 'embedding', [queryVector], 3, { ef: 50 }],
+      result: [[{ id: 1, distance: 0.1 }]],
+    },
+    {
+      method: 'getNodeEdges',
+      call: (d) => d.getNodeEdges(0, { direction: 'both' }),
+      args: [0, { direction: 'both' }],
+      result: [[1, 0]],
+    },
+    {
+      method: 'batchCreateNodesWithProps',
+      call: (d) => d.batchCreateNodesWithProps(['Person'], [{ name: 'Alix' }]),
+      args: [['Person'], [{ name: 'Alix' }]],
+      result: [0],
+    },
+    {
+      method: 'batchCreateEdges',
+      call: (d) => d.batchCreateEdges([{ src: 0, dst: 1, type: 'KNOWS' }]),
+      args: [[{ src: 0, dst: 1, type: 'KNOWS' }]],
+      result: [0],
+    },
+    {
+      method: 'upsertNodes',
+      call: (d) => d.upsertNodes('File', [{ path: 'a' }], { key: 'path' }),
+      args: ['File', [{ path: 'a' }], { key: 'path' }],
+      result: { created: 1, updated: 0, skipped: 0, skippedRows: [] },
+    },
+    {
+      method: 'upsertEdges',
+      call: (d) => d.upsertEdges('IMPORTS', [{ id: 'e' }], { endpointKey: 'path' }),
+      args: ['IMPORTS', [{ id: 'e' }], { endpointKey: 'path' }],
+      result: { created: 0, updated: 0, skipped: 1, skippedRows: [0] },
     },
   ];
 

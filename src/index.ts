@@ -1,10 +1,13 @@
 import { Database as WasmDatabase } from '@grafeo-db/wasm';
 
-import { PersistenceManager } from './persistence';
+import { assertCompactWorks } from './engine-quirks';
+import { PersistenceManager, openPersisted } from './persistence';
 import { ensureWasmInitialized } from './wasm-init';
 import { WorkerProxy } from './worker-proxy';
 import type {
+  BatchEdge,
   Change,
+  CompactReport,
   CreateOptions,
   DatabaseInfo,
   DatabaseSnapshot,
@@ -16,23 +19,34 @@ import type {
   LpgNode,
   MemoryUsage,
   MmrSearchOptions,
+  NodeEdge,
+  NodeEdgesOptions,
   QueryLanguage,
   RawQueryResult,
   RdfImportData,
   RdfImportResult,
   RdfLiteral,
   RdfTriple,
+  SchemaEdgeType,
   SchemaInfo,
   SchemaLabel,
   SearchResult,
   StorageStats,
+  TextIndexOptions,
+  TextSearchOptions,
+  UpsertEdgesOptions,
+  UpsertNodesOptions,
+  UpsertSummary,
   VectorIndexOptions,
   VectorResult,
   VectorSearchOptions,
+  WriteCounters,
 } from './types';
 
 export type {
+  BatchEdge,
   Change,
+  CompactReport,
   CreateOptions,
   DatabaseInfo,
   DatabaseSnapshot,
@@ -44,19 +58,28 @@ export type {
   LpgNode,
   MemoryUsage,
   MmrSearchOptions,
+  NodeEdge,
+  NodeEdgesOptions,
   QueryLanguage,
   RawQueryResult,
   RdfImportData,
   RdfImportResult,
   RdfLiteral,
   RdfTriple,
+  SchemaEdgeType,
   SchemaInfo,
   SchemaLabel,
   SearchResult,
   StorageStats,
+  TextIndexOptions,
+  TextSearchOptions,
+  UpsertEdgesOptions,
+  UpsertNodesOptions,
+  UpsertSummary,
   VectorIndexOptions,
   VectorResult,
   VectorSearchOptions,
+  WriteCounters,
 };
 
 /**
@@ -125,26 +148,13 @@ export class GrafeoDB {
         options.persistInterval,
         options.onPersistError,
       );
-      const snapshot = await persistence.load();
-      if (snapshot) {
-        try {
-          wasm = WasmDatabase.importSnapshot(snapshot);
-        } catch (err) {
-          console.warn(
-            `[grafeo-web] Persisted snapshot for "${options.persist}" is incompatible with this WASM version (likely a storage-format change). Starting with a fresh database. The incompatible snapshot has been kept under the key "${options.persist}__backup".`,
-            err,
-          );
-          // Backup the incompatible snapshot before clearing
-          const backupPersistence = new PersistenceManager(
-            `${options.persist}__backup`,
-          );
-          await backupPersistence.save(snapshot);
-          wasm = new WasmDatabase();
-          await persistence.clear();
-        }
-      } else {
-        wasm = new WasmDatabase();
-      }
+      wasm = await openPersisted(
+        options.persist,
+        persistence,
+        WasmDatabase.version(),
+        (snapshot) => WasmDatabase.importSnapshot(snapshot),
+        () => new WasmDatabase(),
+      );
     } else {
       wasm = new WasmDatabase();
     }
@@ -207,14 +217,11 @@ export class GrafeoDB {
   /**
    * Executes a query and returns raw columns, rows, and metadata.
    *
-   * Note: `params` in options is not supported for raw queries and will be ignored.
-   * Use `execute()` for parameterized queries.
-   *
    * @param query - The query string.
-   * @param options - Optional execution options (language selection).
+   * @param options - Optional execution options (language selection and parameters).
    * @returns Raw result with columns, rows, and optional execution time.
    */
-  async executeRaw(query: string, options?: Pick<ExecuteOptions, 'language'>): Promise<RawQueryResult> {
+  async executeRaw(query: string, options?: ExecuteOptions): Promise<RawQueryResult> {
     this.assertOpen();
 
     if (this.proxy) {
@@ -222,9 +229,19 @@ export class GrafeoDB {
     }
 
     const lang = options?.language;
-    const result = lang && lang !== 'gql'
-      ? this.wasm!.executeRawWithLanguage(query, lang)
-      : this.wasm!.executeRaw(query);
+    const params = options?.params;
+    const hasLang = lang && lang !== 'gql';
+
+    let result;
+    if (hasLang && params) {
+      result = this.wasm!.executeRawWithLanguageAndParams(query, lang, params);
+    } else if (hasLang) {
+      result = this.wasm!.executeRawWithLanguage(query, lang);
+    } else if (params) {
+      result = this.wasm!.executeRawWithParams(query, params);
+    } else {
+      result = this.wasm!.executeRaw(query);
+    }
 
     if (this.persistence && !this.wasm!.isTransactionActive()) {
       this.persistence.scheduleSave(() => this.wasm!.exportSnapshot());
@@ -249,6 +266,21 @@ export class GrafeoDB {
       return this.proxy.edgeCount();
     }
     return this.wasm!.edgeCount();
+  }
+
+  /**
+   * Returns the edges of a node as `[neighborId, edgeId]` pairs, without a
+   * query. Reads through the open transaction when there is one; a node
+   * that does not exist has none.
+   *
+   * @param options - `direction` (`'out'` by default, `'in'` or `'both'`) and `edgeTypes`.
+   */
+  async getNodeEdges(id: number, options?: NodeEdgesOptions): Promise<NodeEdge[]> {
+    this.assertOpen();
+    if (this.proxy) {
+      return this.proxy.getNodeEdges(id, options);
+    }
+    return this.wasm!.getNodeEdges(id, options);
   }
 
   /** Returns schema information (labels, edge types, property keys). */
@@ -326,14 +358,22 @@ export class GrafeoDB {
     throw new Error('changesSince() is not yet implemented: the WASM engine does not expose change tracking');
   }
 
-  /** Creates a BM25 text index on a label/property. Requires 'text-index' WASM feature. */
-  async createTextIndex(label: string, property: string): Promise<void> {
+  /**
+   * Creates a BM25 text index on a label/property. Requires 'text-index' WASM feature.
+   *
+   * @param options - BM25 parameters (`k1`, `b`), the tokenizer and stop words.
+   */
+  async createTextIndex(
+    label: string,
+    property: string,
+    options?: TextIndexOptions,
+  ): Promise<void> {
     this.assertOpen();
     if (this.proxy) {
-      return this.proxy.createTextIndex(label, property);
+      return this.proxy.createTextIndex(label, property, options);
     }
     this.assertFeature('createTextIndex', 'text-index');
-    this.wasm!.createTextIndex(label, property);
+    this.wasm!.createTextIndex(label, property, options);
     if (this.persistence && !this.wasm!.isTransactionActive()) {
       this.persistence.scheduleSave(() => this.wasm!.exportSnapshot());
     }
@@ -366,35 +406,45 @@ export class GrafeoDB {
     }
   }
 
-  /** Full-text search returning scored results. Requires 'text-index' WASM feature. */
+  /**
+   * Full-text search returning scored results. Requires 'text-index' WASM feature.
+   *
+   * @param options - `filters` restricts the search to matching nodes.
+   */
   async textSearch(
     label: string,
     property: string,
     query: string,
     k: number,
+    options?: TextSearchOptions,
   ): Promise<SearchResult[]> {
     this.assertOpen();
     if (this.proxy) {
-      return this.proxy.textSearch(label, property, query, k);
+      return this.proxy.textSearch(label, property, query, k, options);
     }
     this.assertFeature('textSearch', 'text-index');
-    return this.wasm!.textSearch(label, property, query, k);
+    return this.wasm!.textSearch(label, property, query, k, options);
   }
 
-  /** Combined BM25 + vector search. Requires 'hybrid-search' WASM feature. */
+  /**
+   * Combined BM25 + vector search. Requires 'hybrid-search' WASM feature.
+   *
+   * @param options - `filters` keeps only matching nodes before the two searches are fused.
+   */
   async hybridSearch(
     label: string,
     textProp: string,
     vectorProp: string,
     queryText: string,
     k: number,
+    options?: TextSearchOptions,
   ): Promise<SearchResult[]> {
     this.assertOpen();
     if (this.proxy) {
-      return this.proxy.hybridSearch(label, textProp, vectorProp, queryText, k);
+      return this.proxy.hybridSearch(label, textProp, vectorProp, queryText, k, options);
     }
     this.assertFeature('hybridSearch', 'hybrid-search');
-    return this.wasm!.hybridSearch(label, textProp, vectorProp, queryText, k);
+    return this.wasm!.hybridSearch(label, textProp, vectorProp, queryText, k, options);
   }
 
   /** Creates an HNSW vector index. Requires 'vector-index' WASM feature. */
@@ -471,6 +521,27 @@ export class GrafeoDB {
     }
     this.assertFeature('mmrSearch', 'vector-index');
     return this.wasm!.mmrSearch(label, property, query, k, options) as VectorResult[];
+  }
+
+  /**
+   * k-NN vector search for several query vectors of one dimension at once.
+   * Requires 'vector-index' WASM feature.
+   *
+   * @returns One result list per query, nearest first.
+   */
+  async batchVectorSearch(
+    label: string,
+    property: string,
+    queries: (Float32Array | number[])[],
+    k: number,
+    options?: VectorSearchOptions,
+  ): Promise<VectorResult[][]> {
+    this.assertOpen();
+    if (this.proxy) {
+      return this.proxy.batchVectorSearch(label, property, queries, k, options);
+    }
+    this.assertFeature('batchVectorSearch', 'vector-index');
+    return this.wasm!.batchVectorSearch(label, property, queries, k, options);
   }
 
   /**
@@ -552,21 +623,24 @@ export class GrafeoDB {
   }
 
   /**
-   * Rebuilds the database into a layered CompactStore: a columnar read-optimized base
-   * with a writable overlay. Non-destructive: writes after `compact()` land in the overlay,
-   * reads merge both layers. Gives large memory and traversal wins for mostly-read workloads.
-   * Requires 'compact-store' WASM feature.
+   * Drops the old row versions no open transaction can see any more and
+   * reports what it did. Since Grafeo 0.6 it no longer builds a separate
+   * columnar store.
+   *
+   * @throws With Grafeo 0.6.0-beta.1, whose `compact()` panics in WebAssembly:
+   *   the call is refused and the database stays usable.
    */
-  async compact(): Promise<void> {
+  async compact(): Promise<CompactReport> {
     this.assertOpen();
     if (this.proxy) {
       return this.proxy.compact();
     }
-    this.assertFeature('compact', 'compact-store');
-    (this.wasm as unknown as { compact(): void }).compact();
+    assertCompactWorks(WasmDatabase.version());
+    const report = this.wasm!.compact() as CompactReport;
     if (this.persistence && !this.wasm!.isTransactionActive()) {
       this.persistence.scheduleSave(() => this.wasm!.exportSnapshot());
     }
+    return report;
   }
 
   /** Clears the query plan cache. */
@@ -654,6 +728,97 @@ export class GrafeoDB {
       this.persistence.scheduleSave(() => this.wasm!.exportSnapshot());
     }
     return result;
+  }
+
+  /**
+   * Creates one node per row, each with `labels` and the row's properties,
+   * in one transaction: if one breaks a constraint, none is created. Throws
+   * while a transaction is open, since the batch commits on its own.
+   * Requires 'direct-api' WASM feature.
+   *
+   * @returns The node IDs, in row order.
+   */
+  async batchCreateNodesWithProps(
+    labels: string | string[],
+    rows: Record<string, unknown>[],
+  ): Promise<number[]> {
+    this.assertOpen();
+    if (this.proxy) {
+      return this.proxy.batchCreateNodesWithProps(labels, rows);
+    }
+    this.assertFeature('batchCreateNodesWithProps', 'direct-api');
+    const ids = this.wasm!.batchCreateNodesWithProps(labels, rows);
+    if (this.persistence && !this.wasm!.isTransactionActive()) {
+      this.persistence.scheduleSave(() => this.wasm!.exportSnapshot());
+    }
+    return ids;
+  }
+
+  /**
+   * Creates edges between existing nodes in one transaction: if one names a
+   * missing node or breaks the schema, none is created. Throws while a
+   * transaction is open. Requires 'direct-api' WASM feature.
+   *
+   * @returns The edge IDs, in input order.
+   */
+  async batchCreateEdges(edges: BatchEdge[]): Promise<number[]> {
+    this.assertOpen();
+    if (this.proxy) {
+      return this.proxy.batchCreateEdges(edges);
+    }
+    this.assertFeature('batchCreateEdges', 'direct-api');
+    const ids = this.wasm!.batchCreateEdges(edges);
+    if (this.persistence && !this.wasm!.isTransactionActive()) {
+      this.persistence.scheduleSave(() => this.wasm!.exportSnapshot());
+    }
+    return ids;
+  }
+
+  /**
+   * Creates or updates one node per row, matched by the key property and all
+   * of `labels`; a row without the key is skipped. Runs in the open
+   * transaction when there is one. Requires 'direct-api' WASM feature.
+   *
+   * @param options - `key` (default `'id'`) and `replace` (replace the properties instead of merging).
+   */
+  async upsertNodes(
+    labels: string | string[],
+    rows: Record<string, unknown>[],
+    options?: UpsertNodesOptions,
+  ): Promise<UpsertSummary> {
+    this.assertOpen();
+    if (this.proxy) {
+      return this.proxy.upsertNodes(labels, rows, options);
+    }
+    this.assertFeature('upsertNodes', 'direct-api');
+    const summary = this.wasm!.upsertNodes(labels, rows, options);
+    if (this.persistence && !this.wasm!.isTransactionActive()) {
+      this.persistence.scheduleSave(() => this.wasm!.exportSnapshot());
+    }
+    return summary;
+  }
+
+  /**
+   * Creates or updates one `edgeType` edge per row between existing nodes,
+   * matched by the edge key. A row whose endpoint matches no node or several
+   * is skipped; endpoints are never created. Runs in the open transaction
+   * when there is one. Requires 'direct-api' WASM feature.
+   */
+  async upsertEdges(
+    edgeType: string,
+    rows: Record<string, unknown>[],
+    options?: UpsertEdgesOptions,
+  ): Promise<UpsertSummary> {
+    this.assertOpen();
+    if (this.proxy) {
+      return this.proxy.upsertEdges(edgeType, rows, options);
+    }
+    this.assertFeature('upsertEdges', 'direct-api');
+    const summary = this.wasm!.upsertEdges(edgeType, rows, options);
+    if (this.persistence && !this.wasm!.isTransactionActive()) {
+      this.persistence.scheduleSave(() => this.wasm!.exportSnapshot());
+    }
+    return summary;
   }
 
   /**

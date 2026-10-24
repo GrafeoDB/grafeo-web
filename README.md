@@ -14,7 +14,7 @@ Zero backend. Data stays on the client.
 - **Zero backend**: Grafeo runs entirely in the browser via WebAssembly
 - **Persistent storage**: IndexedDB keeps data across sessions
 - **Non-blocking**: Web Worker execution keeps the UI responsive
-- **Multi-language queries**: GQL, Cypher, SPARQL, SQL, Gremlin, GraphQL
+- **Multi-language queries**: GQL, Cypher, SPARQL, SQL/PGQ, Gremlin, GraphQL (also over RDF)
 - **Parameterized queries**: bind `$name`-style parameters safely
 - **Vector search**: HNSW indexes with k-NN and MMR search
 - **Full-text search**: BM25 text indexes with hybrid (text + vector) search
@@ -27,6 +27,13 @@ Zero backend. Data stays on the client.
 ```bash
 npm install @grafeo-db/web
 ```
+
+### Requirements
+
+- `@grafeo-db/web` versions in lockstep with [Grafeo](https://github.com/GrafeoDB/grafeo): 0.6.0 depends on exactly `@grafeo-db/wasm` and `@grafeo-db/wasm-lite` 0.6.0, installed with it. Do not add another version of either to your app.
+- A browser with WebAssembly, ES modules in workers, and IndexedDB (see [Browser Support](#browser-support)).
+- A bundler that handles `.wasm` imports of ES modules (Vite with `vite-plugin-wasm`, webpack 5 with `experiments.asyncWebAssembly`, and the like): the engine packages are wasm-pack `bundler` builds.
+- Node.js 22 or later to build and test this package.
 
 ## Quick Start
 
@@ -58,7 +65,7 @@ for (const row of result) {
 }
 
 // Check version
-console.log(GrafeoDB.version()); // e.g. "0.5.31"
+console.log(GrafeoDB.version()); // e.g. "0.6.0"
 
 // Cleanup
 await db.close();
@@ -76,11 +83,14 @@ await db.execute(`MATCH (p:Person) RETURN p.name`, { language: 'cypher' });
 // SPARQL
 await db.execute(`SELECT ?name WHERE { ?p a :Person ; :name ?name }`, { language: 'sparql' });
 
-// SQL
-await db.execute(`SELECT name FROM Person`, { language: 'sql' });
+// SQL/PGQ
+await db.execute(
+  `SELECT * FROM GRAPH_TABLE (MATCH (p:Person) COLUMNS (p.name AS name)) AS g`,
+  { language: 'sql' },
+);
 ```
 
-Supported: `gql`, `cypher`, `sparql`, `sql`, `gremlin`, `graphql`.
+Supported: `gql`, `cypher`, `sparql`, `sql` (or `sql-pgq`), `gremlin`, `graphql`, and `graphql-rdf` (GraphQL over the RDF triple store).
 
 ## Parameterized Queries
 
@@ -91,7 +101,7 @@ const result = await db.execute(
 );
 ```
 
-Parameters work with all query languages and in the lite build.
+Parameters work with all query languages, with `execute()` and `executeRaw()`, and in the lite build.
 
 ## API
 
@@ -99,22 +109,24 @@ Parameters work with all query languages and in the lite build.
 
 #### Core
 
-| Method                                                    | Description                                                  |
-| --------------------------------------------------------- | ------------------------------------------------------------ |
-| `GrafeoDB.create(options?)`                               | Create a database instance                                   |
-| `GrafeoDB.version()`                                      | Get the WASM engine version                                  |
-| `db.execute(query, options?)`                             | Execute a query, returns `Record<string, unknown>[]`         |
-| `db.executeRaw(query, options?)`                          | Execute a query, returns columns + rows + timing             |
-| `db.nodeCount()`                                          | Number of nodes                                              |
-| `db.edgeCount()`                                          | Number of edges                                              |
-| `db.schema()`                                             | Schema info: labels, edge types, property keys               |
-| `db.memoryUsage()`                                        | Hierarchical WASM heap usage breakdown                       |
-| `db.setSchema(name)`                                      | Set current schema context                                   |
-| `db.resetSchema()`                                        | Clear current schema context                                 |
-| `db.currentSchema()`                                      | Get current schema name (or `undefined`)                     |
-| `db.clearPlanCache()`                                     | Clear cached query plans                                     |
-| `db.isOpen`                                               | Whether the database is still open                           |
-| `db.close()`                                              | Release WASM memory and cleanup                              |
+| Method                           | Description                                                                 |
+| -------------------------------- | --------------------------------------------------------------------------- |
+| `GrafeoDB.create(options?)`      | Create a database instance                                                  |
+| `GrafeoDB.version()`             | Get the WASM engine version                                                 |
+| `db.execute(query, options?)`    | Execute a query, returns `Record<string, unknown>[]`                        |
+| `db.executeRaw(query, options?)` | Execute a query, returns columns + rows + timing + `counters`               |
+| `db.nodeCount()`                 | Number of nodes                                                             |
+| `db.edgeCount()`                 | Number of edges                                                             |
+| `db.getNodeEdges(id, options?)`  | A node's edges as `[neighborId, edgeId]` pairs (`{ direction, edgeTypes }`) |
+| `db.schema()`                    | Schema info: labels, edge types, property keys                              |
+| `db.memoryUsage()`               | Hierarchical WASM heap usage breakdown                                      |
+| `db.setSchema(name)`             | Set current schema context                                                  |
+| `db.resetSchema()`               | Clear current schema context                                                |
+| `db.currentSchema()`             | Get current schema name (or `undefined`)                                    |
+| `db.clearPlanCache()`            | Clear cached query plans                                                    |
+| `db.compact()`                   | Drop row versions no transaction can see; returns a report                  |
+| `db.isOpen`                      | Whether the database is still open                                          |
+| `db.close()`                     | Release WASM memory and cleanup                                             |
 
 #### Persistence & Snapshots
 
@@ -125,33 +137,55 @@ Parameters work with all query languages and in the lite build.
 | `db.clear()`          | Delete all data                    |
 | `db.storageStats()`   | IndexedDB usage and quota          |
 
-#### Import
+#### Import, Batch Writes & Upserts
 
-| Method                         | Description                                       |
-| ------------------------------ | ------------------------------------------------- |
-| `db.importRows(rows, options)` | Import an array of objects as nodes or edges      |
-| `db.importLpg(data)`           | Import LPG nodes and edges in one call            |
-| `db.importRdf(data)`           | Import RDF triples (requires `rdf` WASM feature)  |
+| Method                                           | Description                                                       |
+| ------------------------------------------------ | ----------------------------------------------------------------- |
+| `db.importRows(rows, options)`                   | Import an array of objects as nodes or edges                      |
+| `db.importLpg(data)`                             | Import LPG nodes and edges in one call                            |
+| `db.importRdf(data)`                             | Import RDF triples (requires `rdf` WASM feature)                  |
+| `db.batchCreateNodesWithProps(labels, rows)`     | Create one node per row; returns the node IDs                     |
+| `db.batchCreateEdges(edges)`                     | Create `{ src, dst, type, properties }` edges; returns the IDs    |
+| `db.upsertNodes(labels, rows, options?)`         | Create or update nodes matched by a key (`{ key, replace }`)      |
+| `db.upsertEdges(edgeType, rows, options?)`       | Create or update edges between existing nodes, matched by a key   |
+
+Imports and batch writes are all or nothing: if one row breaks a constraint, the call throws and writes nothing. Batch writes commit on their own, so they throw while a transaction is open; upserts run in the open transaction. Upserts return `{ created, updated, skipped, skippedRows }`:
+
+```typescript
+await db.upsertNodes('File', [{ path: 'a.rs', size: 3 }], { key: 'path' });
+await db.upsertEdges('IMPORTS', [{ id: 'a>b', src: 'a.rs', dst: 'b.rs' }], {
+  endpointKey: 'path',
+  endpointLabels: ['File'],
+});
+```
 
 #### Vector Search (requires `vector-index` WASM feature)
 
-| Method                                                 | Description                                  |
-| ------------------------------------------------------ | -------------------------------------------- |
-| `db.createVectorIndex(label, property, options?)`      | Create an HNSW vector index                  |
-| `db.dropVectorIndex(label, property)`                  | Drop a vector index                          |
-| `db.rebuildVectorIndex(label, property)`               | Drop and recreate, preserving config         |
-| `db.vectorSearch(label, property, query, k, options?)` | k-NN search returning `[{id, distance}]`     |
-| `db.mmrSearch(label, property, query, k, options?)`    | MMR search for diverse results               |
+| Method                                                        | Description                                   |
+| ------------------------------------------------------------- | --------------------------------------------- |
+| `db.createVectorIndex(label, property, options?)`             | Create an HNSW vector index                   |
+| `db.dropVectorIndex(label, property)`                         | Drop a vector index                           |
+| `db.rebuildVectorIndex(label, property)`                      | Drop and recreate, preserving config          |
+| `db.vectorSearch(label, property, query, k, options?)`        | k-NN search returning `[{id, distance}]`      |
+| `db.mmrSearch(label, property, query, k, options?)`           | MMR search for diverse results                |
+| `db.batchVectorSearch(label, property, queries, k, options?)` | Several queries at once, one result list each |
 
 #### Text & Hybrid Search (requires `text-index` / `hybrid-search` WASM features)
 
 | Method                                                       | Description                                |
 | ------------------------------------------------------------ | ------------------------------------------ |
-| `db.createTextIndex(label, property)`                        | Create a BM25 text index                   |
-| `db.dropTextIndex(label, property)`                          | Drop a text index                          |
-| `db.rebuildTextIndex(label, property)`                       | Rebuild a text index                       |
-| `db.textSearch(label, property, query, k)`                   | Full-text search returning `[{id, score}]` |
-| `db.hybridSearch(label, textProp, vectorProp, queryText, k)` | Combined BM25 + vector search              |
+| `db.createTextIndex(label, property, options?)`                       | Create a BM25 text index                   |
+| `db.dropTextIndex(label, property)`                                   | Drop a text index                          |
+| `db.rebuildTextIndex(label, property)`                                | Rebuild a text index                       |
+| `db.textSearch(label, property, query, k, options?)`                  | Full-text search returning `[{id, score}]` |
+| `db.hybridSearch(label, textProp, vectorProp, queryText, k, options?)` | Combined BM25 + vector search              |
+
+Text index options: `{ k1, b, tokenizer, stopWords }`, with the tokenizers `'simple'` (default), `'standard'` (every word, for languages such as Russian or Greek) and `'cjk_bigram'` (Chinese, Japanese, Korean). Search options: `{ filters }`, the property filters `vectorSearch()` takes, applied before the search so up to `k` matching results come back:
+
+```typescript
+await db.createTextIndex('Doc', 'body', { tokenizer: 'standard', k1: 1.5 });
+await db.textSearch('Doc', 'body', 'graph', 10, { filters: { city: 'Berlin' } });
+```
 
 ### `CreateOptions`
 
@@ -160,6 +194,7 @@ Parameters work with all query languages and in the lite build.
   persist?: string;            // IndexedDB key for persistence
   worker?: boolean | Worker;   // Run WASM in a Web Worker (or pass a pre-created Worker)
   persistInterval?: number;    // Debounce interval in ms (default: 1000)
+  onPersistError?: (error: Error) => void; // IndexedDB write failures (default: console.error)
 }
 ```
 
@@ -167,7 +202,7 @@ Parameters work with all query languages and in the lite build.
 
 ```typescript
 {
-  language?: 'gql' | 'cypher' | 'sparql' | 'sql' | 'gremlin' | 'graphql';
+  language?: 'gql' | 'cypher' | 'sparql' | 'sql' | 'sql-pgq' | 'gremlin' | 'graphql' | 'graphql-rdf';
   params?: Record<string, unknown>;  // $name-style parameters
 }
 ```
@@ -188,6 +223,23 @@ const result = await db.execute(`MATCH (u:User) RETURN u.name`);
 ```
 
 Persistence triggers after every query execution (the debounce interval prevents excessive writes).
+
+### Upgrading from 0.5
+
+Databases that `@grafeo-db/web` 0.5.x persisted load in 0.6 without any step on your side: the IndexedDB layout is unchanged, and Grafeo 0.6 still reads the v4 snapshots 0.5.x stored. The first save after the upgrade writes the format of Grafeo 0.6.0 (snapshot v5, which also keeps index and constraint names and text and vector index options).
+
+- **No way back to 0.5.x for a saved database**: 0.5.x cannot read a v5 snapshot. Export first (`db.export()`) if you may need to downgrade.
+- **Property indexes keep working but lose their name**: v4 never stored index names, so an index from 0.5.x is used by queries but not listed by `SHOW INDEXES`. Create it again under a name if you need it listed.
+- **A snapshot the engine refuses is kept, not deleted**: `create({ persist: 'my-app' })` logs a warning naming the snapshot format and the engine version, keeps the snapshot under the key `my-app__backup`, and starts with an empty database. This happens with a snapshot from a newer Grafeo, and in the lite build with a snapshot that holds data the lite build cannot keep (RDF triples, text or vector indexes; 0.5.x dropped such data silently, 0.6 refuses it). Read the backup with the full build:
+
+```typescript
+import { GrafeoDB } from '@grafeo-db/web';
+
+const rescue = await GrafeoDB.create({ persist: 'my-app__backup' });
+const snapshot = await rescue.export();
+```
+
+- **Query results changed in Grafeo 0.6**: a lone `INSERT` returns no rows; GQL sorts nulls last (`ORDER BY x DESC` too); a number with a point is an exact decimal in GQL and SQL/PGQ (`{ $decimal: '1.50' }` in results and parameters); integer overflow and division by zero fail the query; a statement nests at most 64 levels and a property value 128; error messages start with their code (`GRAFEO-Q001: ...`); SPARQL returns RDF/JS terms (`{ termType: 'NamedNode', value: 'http://ex/a' }`, read `.value` for the old string) and `ASK` returns `[{ boolean: true }]`; `importRows()` and `importLpg()` write nothing when a row fails. See the [CHANGELOG](CHANGELOG.md) and Grafeo's [Upgrading to 0.6](https://grafeo.dev/upgrading/0.6/).
 
 ### Storage Management
 
@@ -220,6 +272,30 @@ const db = await GrafeoDB.create({
 // Queries run in background thread - UI stays responsive
 const result = await db.execute(`MATCH (a)-[*1..5]->(b) RETURN count(*)`);
 ```
+
+### Worker client
+
+`@grafeo-db/web` imports the engine for direct mode, and the engine package starts fetching and compiling its 4 MB of WebAssembly as soon as it is imported, also when every query then runs in a worker. If your app only uses worker mode, import the worker client instead: the same `GrafeoDB` API, always in a worker, and the engine is loaded by the worker alone.
+
+```typescript
+import { GrafeoDB } from '@grafeo-db/web/worker-client';
+
+const db = await GrafeoDB.create({ persist: 'my-app' });
+await db.execute(`INSERT (:Person {name: 'Alix'})`);
+console.log(await db.getVersion()); // the engine version, from the worker
+await db.close(); // saves, closes and stops the worker
+```
+
+It has no static `GrafeoDB.version()` (that needs the engine on the main thread): use `db.getVersion()`. To use a Worker your bundler builds, pass it as `worker`; in Vite:
+
+```typescript
+import GrafeoWorker from '@grafeo-db/web/worker-src?worker';
+import { GrafeoDB } from '@grafeo-db/web/worker-client';
+
+const db = await GrafeoDB.create({ worker: new GrafeoWorker(), persist: 'my-app' });
+```
+
+The worker installs its message handler before it loads the engine and answers the calls that arrive meanwhile in order, so the first call after `create()` is never lost, also when the bundler turns the engine's `.wasm` import into a top-level await (Vite does). Calls run one at a time, in the order they were made.
 
 ## Bulk Import
 
@@ -326,7 +402,7 @@ const { data } = useQuery(db, `MATCH (p:Person) RETURN p.name`);
 
 ## Lite Build
 
-A smaller build with GQL support only (no multi-language parsers or AI search features):
+A smaller build with GQL support only (no other query languages, RDF store, AI search features, imports, batch writes or upserts, and no worker mode):
 
 ```typescript
 import { GrafeoDB } from '@grafeo-db/web/lite';
@@ -356,7 +432,7 @@ Requires WebAssembly, IndexedDB and Web Workers.
 | Database size    | ~500 MB (IndexedDB quota)                         |
 | Memory           | ~256 MB (WASM heap)                               |
 | Concurrency      | Single writer, multiple readers                   |
-| `changesSince()` | Returns `[]` (pending WASM change tracking)       |
+| `changesSince()` | Throws: the WASM engine has no change tracking yet |
 
 For larger datasets, use [Grafeo](https://github.com/GrafeoDB/grafeo) server-side.
 
@@ -428,9 +504,10 @@ If you see errors like "Failed to construct Worker" or "Module not found":
 ## Development
 
 ```bash
-npm run build      # Build all entries via tsup
-npm test           # Run tests (vitest, 201 tests)
-npm run typecheck  # Type check (tsc --noEmit)
+npm run build             # Build all entries via tsup
+npm test                  # Unit tests (vitest, mocked engine)
+npm run test:integration  # Integration tests on the real engine packages and dist/ (build first)
+npm run typecheck         # Type check (tsc --noEmit)
 ```
 
 ## Related

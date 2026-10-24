@@ -6,6 +6,7 @@ vi.mock('@grafeo-db/wasm-lite', () => import('./__mocks__/wasm'));
 const { GrafeoDB } = await import('./index');
 const { GrafeoDB: GrafeoDBLite } = await import('./lite');
 const { WorkerProxy } = await import('./worker-proxy');
+const { GrafeoDB: GrafeoWorkerClient } = await import('./worker-client');
 type GrafeoDBInstance = Awaited<ReturnType<typeof GrafeoDB.create>>;
 
 describe('API parity', () => {
@@ -58,6 +59,19 @@ describe('API parity', () => {
     });
   });
 
+  describe('worker client vs main API', () => {
+    it('@grafeo-db/web/worker-client has every instance method and getter of GrafeoDB', () => {
+      const members = (proto: object) =>
+        Object.getOwnPropertyNames(proto).filter(
+          (name) => name !== 'constructor' && !['assertOpen', 'assertFeature', 'open'].includes(name),
+        );
+      const missing = members(GrafeoDB.prototype).filter(
+        (name) => !members(GrafeoWorkerClient.prototype).includes(name),
+      );
+      expect(missing, `worker client is missing: ${missing.join(', ')}`).toEqual([]);
+    });
+  });
+
   describe('T10: schema after mutations', () => {
     let db: GrafeoDBInstance;
 
@@ -97,7 +111,7 @@ describe('API parity', () => {
       const labelNames2 = schema2.labels.map((l) => l.name);
       expect(labelNames2).toContain('Person');
       expect(labelNames2).toContain('Company');
-      expect(schema2.edge_types).toContain('EMPLOYS');
+      expect(schema2.edge_types).toContainEqual({ name: 'EMPLOYS', count: 1 });
     });
 
     it('schema starts empty for a fresh database', async () => {
@@ -130,6 +144,7 @@ describe('API parity', () => {
         'currentSchema',
         'clearPlanCache',
         'info',
+        'getNodeEdges',
       ];
 
       for (const method of expectedMethods) {
@@ -161,6 +176,11 @@ describe('API parity', () => {
         'importRdf',
         'memoryUsage',
         'getVersion',
+        'batchVectorSearch',
+        'batchCreateNodesWithProps',
+        'batchCreateEdges',
+        'upsertNodes',
+        'upsertEdges',
       ];
 
       for (const method of fullOnlyMethods) {

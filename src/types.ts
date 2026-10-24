@@ -1,5 +1,18 @@
-/** Supported query languages. */
-export type QueryLanguage = 'gql' | 'cypher' | 'sparql' | 'graphql' | 'gremlin' | 'sql';
+/**
+ * Supported query languages.
+ *
+ * `'graphql-rdf'` is GraphQL over the RDF triple store, and `'sql-pgq'` is an
+ * alias of `'sql'` (SQL/PGQ). The lite build accepts GQL only.
+ */
+export type QueryLanguage =
+  | 'gql'
+  | 'cypher'
+  | 'sparql'
+  | 'graphql'
+  | 'graphql-rdf'
+  | 'gremlin'
+  | 'sql'
+  | 'sql-pgq';
 
 /** Options for creating a GrafeoDB instance. */
 export interface CreateOptions {
@@ -68,11 +81,122 @@ export interface SearchResult {
   score: number;
 }
 
+/** What a statement wrote, as `executeRaw()` reports it. */
+export interface WriteCounters {
+  nodesCreated: number;
+  nodesDeleted: number;
+  edgesCreated: number;
+  edgesDeleted: number;
+  propertiesSet: number;
+  labelsAdded: number;
+  labelsRemoved: number;
+}
+
 /** Raw query result with column metadata. */
 export interface RawQueryResult {
   columns: string[];
   rows: unknown[][];
   executionTimeMs?: number;
+  /** Whether the result holds rows, a boolean (SPARQL `ASK`) or a graph (SPARQL `CONSTRUCT`). */
+  kind?: 'rows' | 'boolean' | 'graph';
+  /** What the statement wrote; all zero for a read. */
+  counters?: WriteCounters;
+  /**
+   * The operator tree of a `PROFILE` statement, as data.
+   *
+   * @experimental Its operators and keys may still change in Grafeo 0.6.x.
+   */
+  profile?: unknown;
+}
+
+/** What `compact()` did, as the engine reports it. */
+export interface CompactReport {
+  /** Whether a checkpoint was written (always `false` in the browser: the database is in memory). */
+  checkpointed: boolean;
+  /** Old row versions dropped because no open transaction can see them any more. */
+  versions_collected: number;
+  /** Rows whose property columns were encoded in memory. */
+  rows_compressed: number;
+  /** How long the compaction took, in milliseconds. */
+  duration_ms: number;
+}
+
+/** Options for `getNodeEdges()`. */
+export interface NodeEdgesOptions {
+  /** Which edges: `'out'` (the default), `'in'` or `'both'` (a self-loop is listed once). */
+  direction?: 'out' | 'in' | 'both';
+  /** Keep only edges of these types. */
+  edgeTypes?: string[];
+}
+
+/** An edge of a node, as `[neighborId, edgeId]`. */
+export type NodeEdge = [neighborId: number, edgeId: number];
+
+/** An edge for `batchCreateEdges()`, between existing node IDs. */
+export interface BatchEdge {
+  src: number;
+  dst: number;
+  type: string;
+  properties?: Record<string, unknown>;
+}
+
+/** Options for `upsertNodes()`. */
+export interface UpsertNodesOptions {
+  /** The property that identifies a node, together with the labels. Default: `'id'`. */
+  key?: string;
+  /** Replace a matched node's properties with the row's, instead of merging the row's in. */
+  replace?: boolean;
+}
+
+/** Options for `upsertEdges()`. */
+export interface UpsertEdgesOptions {
+  /** The property that identifies an edge. Default: `'id'`. */
+  key?: string;
+  /** The row field that holds the source node's key. Default: `'src'`. */
+  srcField?: string;
+  /** The row field that holds the target node's key. Default: `'dst'`. */
+  dstField?: string;
+  /** The node property the `srcField` and `dstField` values match. Default: `'id'`. */
+  endpointKey?: string;
+  /** Labels an endpoint must have, all of them. */
+  endpointLabels?: string[];
+  /** Replace a matched edge's properties with the row's, instead of merging the row's in. */
+  replace?: boolean;
+}
+
+/** What `upsertNodes()` or `upsertEdges()` did. */
+export interface UpsertSummary {
+  created: number;
+  updated: number;
+  skipped: number;
+  /** Indexes of the skipped rows: rows without the key, or edges whose endpoints match no node or several. */
+  skippedRows: number[];
+}
+
+/** Options for creating a BM25 text index. */
+export interface TextIndexOptions {
+  /** BM25 term-frequency saturation, at least 0. Default: 1.2. */
+  k1?: number;
+  /** BM25 length normalization, 0 to 1. Default: 0.75. */
+  b?: number;
+  /**
+   * Tokenizer: `'simple'` (the default), `'standard'` (every word, for
+   * languages such as Russian or Greek) or `'cjk_bigram'` (pairs of
+   * characters, for Chinese, Japanese and Korean).
+   */
+  tokenizer?: 'simple' | 'standard' | 'cjk_bigram';
+  /** Stop words to use in place of the tokenizer's own. */
+  stopWords?: string[];
+}
+
+/** Options for text and hybrid search. */
+export interface TextSearchOptions {
+  /**
+   * Property filters, as `vectorSearch()` takes them: equality
+   * (`{ city: 'Berlin' }`) or operators (`{ rank: { $gt: 19 } }`). Only
+   * matching nodes are searched, so up to `k` matching results come back.
+   */
+  filters?: Record<string, unknown>;
 }
 
 /** A node to import via importLpg(). */
@@ -217,11 +341,17 @@ export interface SchemaLabel {
   count: number;
 }
 
+/** An edge type entry returned by schema(). */
+export interface SchemaEdgeType {
+  name: string;
+  count: number;
+}
+
 /** Schema information returned by schema(). */
 export interface SchemaInfo {
   mode: string;
   labels: SchemaLabel[];
-  edge_types: string[];
+  edge_types: SchemaEdgeType[];
   property_keys: string[];
 }
 
@@ -237,4 +367,6 @@ export interface WorkerResponse {
   id: number;
   result?: unknown;
   error?: string;
+  /** Extra fields of the error (its `name`, and `gqlStatus` when the engine sets it). */
+  errorInfo?: { name?: string; gqlStatus?: string };
 }

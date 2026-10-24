@@ -3,8 +3,7 @@ name: Publish
 on:
   release:
     types: [published]
-  # Release.yml dispatches this: a release it creates with GITHUB_TOKEN does not
-  # fire the `release` event. Also usable by hand.
+  # By hand, to re-run a publish on the release tag.
   workflow_dispatch:
 
 jobs:
@@ -26,9 +25,9 @@ jobs:
           cache: 'npm'
           registry-url: 'https://registry.npmjs.org'
 
-      # Publish only from this version's release tag: the release event and the
-      # dispatch from release.yml both run on refs/tags/v<version>. A manual run
-      # from a branch, or from a tag that does not match package.json, stops.
+      # Publish only from this version's release tag: the release event runs on
+      # refs/tags/v<version>. A manual run from a branch, or from a tag that does
+      # not match package.json, stops.
       - name: Check the ref is this version's release tag
         run: |
           VERSION=$(node -p "require('./package.json').version")
@@ -43,11 +42,21 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      # Lockstep pins, and no stable release on an engine pre-release (web
+      # 0.6.0 was prepared on @grafeo-db/wasm 0.6.0-beta.1 and ships on 0.6.0).
+      - name: Check the wasm pins may be published
+        run: npx vitest run src/lockstep.test.ts
+        env:
+          GRAFEO_WEB_RELEASE: '1'
+
       - name: Build
         run: npm run build
 
       # Trusted publishing (OIDC), no token. A version already on npm is
       # skipped, so a re-run is safe while a real failure still fails the job.
+      # A pre-release (0.6.0-beta.1) goes to the `next` dist-tag, as the wasm
+      # packages do; anything else, a web hotfix included, to `latest`. npm 11
+      # refuses a version with a pre-release part without an explicit tag.
       - name: Publish to npm
         run: |
           NAME=$(node -p "require('./package.json').name")
@@ -56,5 +65,10 @@ jobs:
             echo "${NAME}@${VERSION} is already on npm, skipping"
             exit 0
           fi
-          echo "Publishing ${NAME}@${VERSION}"
-          npm publish --access public
+          if echo "${VERSION}" | grep -Eq -e '-(alpha|beta|rc)\.[0-9]+$'; then
+            TAG=next
+          else
+            TAG=latest
+          fi
+          echo "Publishing ${NAME}@${VERSION} with dist-tag ${TAG}"
+          npm publish --access public --tag "${TAG}"
