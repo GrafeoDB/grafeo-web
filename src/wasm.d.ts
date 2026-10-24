@@ -1,12 +1,10 @@
 /**
  * Type declarations for @grafeo-db/wasm and @grafeo-db/wasm-lite.
  *
- * These mirror the wasm-bindgen generated types from the WASM crate (v0.5.42).
- * Both variants expose the same API surface; the lite variant simply omits
- * multi-language and AI search features at the WASM level.
- *
- * Once @grafeo-db/wasm is published to npm with its own types, this file
- * can be removed.
+ * These mirror the wasm-bindgen generated types of the WASM crate
+ * (0.6.0), with the result shapes the generated `any` leaves out.
+ * The lite variant leaves out the other query languages and the AI search
+ * features at the WASM level.
  */
 declare module '@grafeo-db/wasm' {
   export class Database {
@@ -58,6 +56,27 @@ declare module '@grafeo-db/wasm' {
       executionTimeMs?: number;
     };
 
+    /** Executes a GQL query with parameters and returns raw columns/rows (0.6). */
+    executeRawWithParams(
+      query: string,
+      params: object,
+    ): {
+      columns: string[];
+      rows: unknown[][];
+      executionTimeMs?: number;
+    };
+
+    /** Executes a query in a language with parameters and returns raw columns/rows (0.6). */
+    executeRawWithLanguageAndParams(
+      query: string,
+      language: string,
+      params: object,
+    ): {
+      columns: string[];
+      rows: unknown[][];
+      executionTimeMs?: number;
+    };
+
     /** Executes a Cypher query. Requires 'cypher' WASM feature. */
     executeCypher(query: string): Record<string, unknown>[];
 
@@ -73,8 +92,11 @@ declare module '@grafeo-db/wasm' {
     /** Executes a SQL/PGQ query. Requires 'sql-pgq' WASM feature. */
     executeSql(query: string): Record<string, unknown>[];
 
-    /** Creates a BM25 text index on a label/property. Requires 'text-index' feature. */
-    createTextIndex(label: string, property: string): void;
+    /**
+     * Creates a BM25 text index on a label/property. Requires 'text-index' feature.
+     * `options` (0.6): `k1`, `b`, `tokenizer` and `stopWords`.
+     */
+    createTextIndex(label: string, property: string, options?: object): void;
 
     /** Drops a text index. Returns true if one existed. Requires 'text-index' feature. */
     dropTextIndex(label: string, property: string): boolean;
@@ -88,6 +110,7 @@ declare module '@grafeo-db/wasm' {
       property: string,
       query: string,
       k: number,
+      options?: object,
     ): { id: number; score: number }[];
 
     /** Combined BM25 + vector search. Requires 'hybrid-search' feature. */
@@ -97,6 +120,7 @@ declare module '@grafeo-db/wasm' {
       vectorProp: string,
       queryText: string,
       k: number,
+      options?: object,
     ): { id: number; score: number }[];
 
     /**
@@ -153,6 +177,44 @@ declare module '@grafeo-db/wasm' {
       options?: object,
     ): { id: number; distance: number }[];
 
+    /** k-NN search for several query vectors of one dimension; one result list per query (0.6). */
+    batchVectorSearch(
+      label: string,
+      property: string,
+      queries: (Float32Array | number[])[],
+      k: number,
+      options?: object,
+    ): { id: number; distance: number }[][];
+
+    /** The edges of a node as `[neighborId, edgeId]` pairs (0.6). */
+    getNodeEdges(id: number, options?: object): [number, number][];
+
+    /**
+     * Creates one node per row in one transaction and returns their IDs (0.6).
+     * Throws while a transaction is open.
+     */
+    batchCreateNodesWithProps(labels: string | string[], rows: object[]): number[];
+
+    /**
+     * Creates `{src, dst, type, properties?}` edges in one transaction and
+     * returns their IDs (0.6). Throws while a transaction is open.
+     */
+    batchCreateEdges(edges: object[]): number[];
+
+    /** Creates or updates nodes matched by a key property (0.6). */
+    upsertNodes(
+      labels: string | string[],
+      rows: object[],
+      options?: object,
+    ): { created: number; updated: number; skipped: number; skippedRows: number[] };
+
+    /** Creates or updates edges between existing nodes, matched by a key property (0.6). */
+    upsertEdges(
+      edgeType: string,
+      rows: object[],
+      options?: object,
+    ): { created: number; updated: number; skipped: number; skippedRows: number[] };
+
     /** Sets the current schema context for subsequent queries. */
     setSchema(name: string): void;
 
@@ -182,10 +244,11 @@ declare module '@grafeo-db/wasm' {
     clearPlanCache(): void;
 
     /**
-     * Rebuilds the database into a layered CompactStore (columnar base + writable overlay).
-     * Non-destructive: writes after compaction land in the overlay. Requires 'compact-store' feature.
+     * Drops the old row versions no open transaction can see any more and
+     * reports what it did (0.6: no longer builds a separate columnar store,
+     * and no longer needs the 'compact-store' feature).
      */
-    compact(): void;
+    compact(): { checkpointed: boolean; versions_collected: number; rows_compressed: number; duration_ms: number };
 
     /** Returns a hierarchical memory usage breakdown. */
     memoryUsage(): object;
@@ -284,7 +347,7 @@ declare module '@grafeo-db/wasm' {
 }
 
 /**
- * Lite variant: GQL-only, smaller binary (~507 KB gzipped).
+ * Lite variant: GQL-only, smaller binary.
  * Same API surface as @grafeo-db/wasm; AI search methods exist in the type
  * but throw at runtime when the feature is not compiled in.
  */
@@ -301,8 +364,18 @@ declare module '@grafeo-db/wasm-lite' {
       query: string,
       params: object,
     ): Record<string, unknown>[];
+    executeRawWithParams(
+      query: string,
+      params: object,
+    ): {
+      columns: string[];
+      rows: unknown[][];
+      executionTimeMs?: number;
+    };
+    compact(): { checkpointed: boolean; versions_collected: number; rows_compressed: number; duration_ms: number };
     nodeCount(): number;
     edgeCount(): number;
+    getNodeEdges(id: number, options?: object): [number, number][];
     schema(): unknown;
     setSchema(name: string): void;
     resetSchema(): void;

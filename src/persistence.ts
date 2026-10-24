@@ -171,3 +171,46 @@ export class PersistenceManager {
     return { bytesUsed: 0, quota: 0 };
   }
 }
+
+const SIGNED_MAGIC = [0x47, 0x53, 0x4e, 0x31]; // "GSN1"
+
+/**
+ * Names the engine snapshot format of `data` for messages: `v4` (Grafeo
+ * 0.5.x and 0.6.0-beta.1), `v5` (Grafeo 0.6.0), `signed v4`, and so on.
+ * The engine writes its format version in the first byte, after the `GSN1`
+ * header for a signed snapshot.
+ */
+export function snapshotFormat(data: Uint8Array): string {
+  const signed = data.length > 4 && SIGNED_MAGIC.every((b, i) => data[i] === b);
+  const version = signed ? data[4] : data[0];
+  if (version === undefined) return 'empty';
+  return signed ? `signed v${version}` : `v${version}`;
+}
+
+/**
+ * Opens the database persisted under `key`, or a fresh one when there is
+ * none. A snapshot the engine refuses (a format it cannot read, or data its
+ * build lacks a feature for) is kept under `<key>__backup` and the database
+ * starts fresh, so an upgrade never deletes data the user can still recover.
+ */
+export async function openPersisted<T>(
+  key: string,
+  persistence: PersistenceManager,
+  engineVersion: string,
+  open: (snapshot: Uint8Array) => T,
+  fresh: () => T,
+): Promise<T> {
+  const snapshot = await persistence.load();
+  if (!snapshot) return fresh();
+  try {
+    return open(snapshot);
+  } catch (err) {
+    console.warn(
+      `[grafeo-web] Persisted snapshot for "${key}" (snapshot format ${snapshotFormat(snapshot)}) is incompatible with this WASM version (Grafeo ${engineVersion}). Starting with a fresh database. The incompatible snapshot has been kept under the key "${key}__backup".`,
+      err,
+    );
+    await new PersistenceManager(`${key}__backup`).save(snapshot);
+    await persistence.clear();
+    return fresh();
+  }
+}

@@ -157,6 +157,23 @@ describe('WorkerProxy', () => {
     });
   });
 
+  describe('errors from the worker', () => {
+    it('rebuilds the error name and gqlStatus', async () => {
+      const promise = proxy.execute('RETURN 10 / 0');
+      const calls = mockWorker.postMessage.mock.calls;
+      const { id } = calls[calls.length - 1][0] as { id: number };
+      mockWorker.onmessage?.({
+        data: { id, error: 'GRAFEO-Q006: division by zero', errorInfo: { name: 'TypeError', gqlStatus: '22012' } },
+      } as MessageEvent<WorkerResponse>);
+
+      const err = await promise.catch((e: unknown) => e);
+      expect(err).toBeInstanceOf(Error);
+      expect((err as Error).message).toBe('GRAFEO-Q006: division by zero');
+      expect((err as Error).name).toBe('TypeError');
+      expect((err as Error & { gqlStatus?: string }).gqlStatus).toBe('22012');
+    });
+  });
+
   describe('text/hybrid search proxy', () => {
     it('sends createTextIndex and resolves', async () => {
       const promise = proxy.createTextIndex('Person', 'name');
@@ -168,7 +185,29 @@ describe('WorkerProxy', () => {
           mockWorker.postMessage.mock.calls.length - 1
         ][0];
       expect(lastCall.method).toBe('createTextIndex');
-      expect(lastCall.args).toEqual(['Person', 'name']);
+      expect(lastCall.args).toEqual(['Person', 'name', undefined]);
+    });
+
+    it('sends text index options and search filters', async () => {
+      const calls = mockWorker.postMessage.mock.calls;
+      const create = proxy.createTextIndex('Doc', 'body', { tokenizer: 'standard' });
+      respondToLast(undefined);
+      await create;
+      expect(calls[calls.length - 1][0].args).toEqual(['Doc', 'body', { tokenizer: 'standard' }]);
+
+      const text = proxy.textSearch('Doc', 'body', 'graph', 5, { filters: { city: 'Berlin' } });
+      respondToLast([]);
+      await text;
+      expect(calls[calls.length - 1][0].args).toEqual([
+        'Doc', 'body', 'graph', 5, { filters: { city: 'Berlin' } },
+      ]);
+
+      const hybrid = proxy.hybridSearch('Doc', 'body', 'emb', 'graph', 5, { filters: { x: 1 } });
+      respondToLast([]);
+      await hybrid;
+      expect(calls[calls.length - 1][0].args).toEqual([
+        'Doc', 'body', 'emb', 'graph', 5, { filters: { x: 1 } },
+      ]);
     });
 
     it('sends dropTextIndex and resolves with boolean', async () => {

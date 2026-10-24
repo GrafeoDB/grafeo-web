@@ -8,6 +8,7 @@ export default defineConfig({
     vue: 'src/vue.ts',
     svelte: 'src/svelte.ts',
     worker: 'src/worker.ts',
+    'worker-client': 'src/worker-client.ts',
   },
   format: ['esm', 'cjs'],
   dts: true,

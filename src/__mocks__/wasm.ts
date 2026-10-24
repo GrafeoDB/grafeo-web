@@ -2,7 +2,7 @@
  * Mock for @grafeo-db/wasm used in tests.
  *
  * Simulates a basic in-memory graph database with INSERT/MATCH support.
- * Matches the WASM 0.5.42 API surface.
+ * Matches the WASM 0.6.0 API surface.
  */
 
 interface Node {
@@ -68,7 +68,7 @@ export class Database {
     language: string,
   ): Record<string, unknown>[] {
     this.assertNotFreed();
-    const supported = ['gql', 'cypher', 'sparql', 'gremlin', 'graphql', 'sql'];
+    const supported = ['gql', 'cypher', 'sparql', 'gremlin', 'graphql', 'graphql-rdf', 'sql', 'sql-pgq'];
     if (!supported.includes(language)) {
       throw new Error(
         `Unknown query language: '${language}'. Supported: ${supported.join(', ')}`,
@@ -103,7 +103,24 @@ export class Database {
     return this.executeRaw(query);
   }
 
-  createTextIndex(_label: string, _property: string): void {
+  executeRawWithParams(
+    query: string,
+    _params: object,
+  ): { columns: string[]; rows: unknown[][]; executionTimeMs?: number } {
+    this.assertNotFreed();
+    return this.executeRaw(query);
+  }
+
+  executeRawWithLanguageAndParams(
+    query: string,
+    _language: string,
+    _params: object,
+  ): { columns: string[]; rows: unknown[][]; executionTimeMs?: number } {
+    this.assertNotFreed();
+    return this.executeRaw(query);
+  }
+
+  createTextIndex(_label: string, _property: string, _options?: object): void {
     this.assertNotFreed();
   }
 
@@ -121,6 +138,7 @@ export class Database {
     _property: string,
     _query: string,
     _k: number,
+    _options?: object,
   ): { id: number; score: number }[] {
     this.assertNotFreed();
     return [];
@@ -132,6 +150,7 @@ export class Database {
     _vectorProp: string,
     _queryText: string,
     _k: number,
+    _options?: object,
   ): { id: number; score: number }[] {
     this.assertNotFreed();
     return [];
@@ -198,12 +217,8 @@ export class Database {
     edges: Array<{ source: number; target: number; type: string; properties?: Record<string, unknown> }>;
   }): { nodes: number; edges: number } {
     this.assertNotFreed();
-    const startIdx = this.nodes.length;
-    for (const node of data.nodes) {
-      this.nodes.push({ labels: node.labels, properties: node.properties ?? {} });
-    }
-    // Like the real binding: nodes are written first, then a bad edge index
-    // fails the call (the nodes stay).
+    // Like the real binding (0.6): all or nothing, so a bad edge index fails
+    // the call before anything is written.
     for (const [i, edge] of data.edges.entries()) {
       for (const end of ['source', 'target'] as const) {
         if (edge[end] < 0 || edge[end] >= data.nodes.length) {
@@ -212,6 +227,12 @@ export class Database {
           );
         }
       }
+    }
+    const startIdx = this.nodes.length;
+    for (const node of data.nodes) {
+      this.nodes.push({ labels: node.labels, properties: node.properties ?? {} });
+    }
+    for (const edge of data.edges) {
       this.edges.push({
         type: edge.type,
         sourceIdx: startIdx + edge.source,
@@ -233,6 +254,101 @@ export class Database {
     return { triples: _data.triples.length };
   }
 
+  batchCreateNodesWithProps(labels: string | string[], rows: Record<string, unknown>[]): number[] {
+    this.assertNotFreed();
+    this.assertNoBatchInTransaction('batchCreateNodesWithProps');
+    const labelList = typeof labels === 'string' ? [labels] : labels;
+    return rows.map((properties) => this.nodes.push({ labels: [...labelList], properties: { ...properties } }) - 1);
+  }
+
+  batchCreateEdges(
+    edges: Array<{ src: number; dst: number; type: string; properties?: Record<string, unknown> }>,
+  ): number[] {
+    this.assertNotFreed();
+    this.assertNoBatchInTransaction('batchCreateEdges');
+    for (const edge of edges) {
+      for (const end of [edge.src, edge.dst]) {
+        if (end < 0 || end >= this.nodes.length) {
+          throw new Error(`GRAFEO-V002: Node not found: ${end}`);
+        }
+      }
+    }
+    return edges.map(
+      (edge) =>
+        this.edges.push({
+          type: edge.type,
+          sourceIdx: edge.src,
+          targetIdx: edge.dst,
+          properties: { ...(edge.properties ?? {}) },
+        }) - 1,
+    );
+  }
+
+  upsertNodes(
+    labels: string | string[],
+    rows: Record<string, unknown>[],
+    options?: { key?: string; replace?: boolean },
+  ): { created: number; updated: number; skipped: number; skippedRows: number[] } {
+    this.assertNotFreed();
+    const labelList = typeof labels === 'string' ? [labels] : labels;
+    const key = options?.key ?? 'id';
+    const summary = { created: 0, updated: 0, skipped: 0, skippedRows: [] as number[] };
+    for (const [i, row] of rows.entries()) {
+      if (!(key in row)) {
+        summary.skipped++;
+        summary.skippedRows.push(i);
+        continue;
+      }
+      const match = this.nodes.find(
+        (n) => labelList.every((l) => n.labels.includes(l)) && n.properties[key] === row[key],
+      );
+      if (match) {
+        match.properties = options?.replace ? { ...row } : { ...match.properties, ...row };
+        summary.updated++;
+      } else {
+        this.nodes.push({ labels: [...labelList], properties: { ...row } });
+        summary.created++;
+      }
+    }
+    return summary;
+  }
+
+  upsertEdges(
+    _edgeType: string,
+    rows: Record<string, unknown>[],
+    _options?: object,
+  ): { created: number; updated: number; skipped: number; skippedRows: number[] } {
+    this.assertNotFreed();
+    // The mock matches no endpoints: every row is skipped.
+    return { created: 0, updated: 0, skipped: rows.length, skippedRows: rows.map((_, i) => i) };
+  }
+
+  getNodeEdges(id: number, options?: { direction?: string; edgeTypes?: string[] }): [number, number][] {
+    this.assertNotFreed();
+    const direction = options?.direction ?? 'out';
+    const pairs: [number, number][] = [];
+    for (const [edgeId, edge] of this.edges.entries()) {
+      if (options?.edgeTypes && !options.edgeTypes.includes(edge.type)) continue;
+      if ((direction === 'out' || direction === 'both') && edge.sourceIdx === id) {
+        pairs.push([edge.targetIdx, edgeId]);
+      } else if ((direction === 'in' || direction === 'both') && edge.targetIdx === id) {
+        pairs.push([edge.sourceIdx, edgeId]);
+      }
+    }
+    return pairs;
+  }
+
+  batchVectorSearch(
+    _label: string,
+    _property: string,
+    queries: (Float32Array | number[])[],
+    _k: number,
+    _options?: object,
+  ): { id: number; distance: number }[][] {
+    this.assertNotFreed();
+    return queries.map(() => []);
+  }
+
   nodeCount(): number {
     this.assertNotFreed();
     return this.nodes.length;
@@ -250,7 +366,10 @@ export class Database {
       name,
       count: this.nodes.filter((n) => n.labels.includes(name)).length,
     }));
-    const edge_types = [...new Set(this.edges.map((e) => e.type))];
+    const edge_types = [...new Set(this.edges.map((e) => e.type))].map((name) => ({
+      name,
+      count: this.edges.filter((e) => e.type === name).length,
+    }));
     const property_keys = [
       ...new Set(this.nodes.flatMap((n) => Object.keys(n.properties))),
     ];
@@ -297,8 +416,9 @@ export class Database {
     this.assertNotFreed();
   }
 
-  compact(): void {
+  compact(): { checkpointed: boolean; versions_collected: number; rows_compressed: number; duration_ms: number } {
     this.assertNotFreed();
+    return { checkpointed: false, versions_collected: 0, rows_compressed: 0, duration_ms: 0 };
   }
 
   info(): object {
@@ -310,13 +430,13 @@ export class Database {
       is_persistent: false,
       path: null,
       wal_enabled: false,
-      version: '0.5.42-mock',
+      version: '0.6.0-mock',
       features: ['gql'],
     };
   }
 
   static version(): string {
-    return '0.5.42-mock';
+    return '0.6.0-mock';
   }
 
   exportSnapshot(): Uint8Array {
@@ -438,6 +558,12 @@ export class Database {
     this.nodes = [];
     this.edges = [];
     this.projections.clear();
+  }
+
+  private assertNoBatchInTransaction(method: string): void {
+    if (this.inTransaction) {
+      throw new Error(`${method} commits on its own: commit or roll back the open transaction first`);
+    }
   }
 
   private assertNotFreed(): void {

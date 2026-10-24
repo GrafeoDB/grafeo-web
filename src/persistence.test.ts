@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { PersistenceManager } from './persistence';
+import { PersistenceManager, snapshotFormat } from './persistence';
 
 // happy-dom provides IndexedDB
 describe('PersistenceManager', () => {
@@ -171,5 +171,20 @@ describe('PersistenceManager', () => {
 
       await pm2.clear();
     });
+  });
+});
+
+describe('snapshotFormat()', () => {
+  it('reads the engine format version from the first byte', () => {
+    expect(snapshotFormat(new Uint8Array([4, 1, 2]))).toBe('v4');
+    expect(snapshotFormat(new Uint8Array([5]))).toBe('v5');
+  });
+
+  it('reads it after the GSN1 header of a signed snapshot', () => {
+    expect(snapshotFormat(new Uint8Array([0x47, 0x53, 0x4e, 0x31, 4, 9, 9]))).toBe('signed v4');
+  });
+
+  it('names an empty snapshot', () => {
+    expect(snapshotFormat(new Uint8Array())).toBe('empty');
   });
 });

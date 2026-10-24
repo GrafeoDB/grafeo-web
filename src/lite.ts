@@ -1,27 +1,48 @@
 import { Database as WasmDatabase } from '@grafeo-db/wasm-lite';
 
-import { PersistenceManager } from './persistence';
+import { assertCompactWorks } from './engine-quirks';
+import { PersistenceManager, openPersisted } from './persistence';
 import { ensureLiteWasmInitialized } from './wasm-init-lite';
 import type {
   Change,
+  CompactReport,
   DatabaseInfo,
   DatabaseSnapshot,
   LiteCreateOptions,
   LiteExecuteOptions,
+  NodeEdge,
+  NodeEdgesOptions,
   RawQueryResult,
+  SchemaEdgeType,
   SchemaInfo,
   SchemaLabel,
   StorageStats,
+  WriteCounters,
 } from './types';
 
-export type { Change, DatabaseInfo, DatabaseSnapshot, LiteCreateOptions, LiteExecuteOptions, RawQueryResult, SchemaInfo, SchemaLabel, StorageStats };
+export type {
+  Change,
+  CompactReport,
+  DatabaseInfo,
+  DatabaseSnapshot,
+  LiteCreateOptions,
+  LiteExecuteOptions,
+  NodeEdge,
+  NodeEdgesOptions,
+  RawQueryResult,
+  SchemaEdgeType,
+  SchemaInfo,
+  SchemaLabel,
+  StorageStats,
+  WriteCounters,
+};
 
 /**
  * A lightweight Grafeo database supporting GQL only.
  *
- * Identical API to the full `GrafeoDB` but uses a smaller WASM binary
- * (~507 KB gzipped vs ~600 KB) by excluding AI search features,
- * Cypher, SPARQL, GraphQL, and Gremlin parsers.
+ * The core API of the full `GrafeoDB` on a smaller WASM binary, without
+ * the AI search features, the RDF store and the Cypher, SPARQL, GraphQL,
+ * Gremlin and SQL/PGQ parsers.
  *
  * @example
  * ```typescript
@@ -61,25 +82,13 @@ export class GrafeoDB {
         options.persistInterval,
         options.onPersistError,
       );
-      const snapshot = await persistence.load();
-      if (snapshot) {
-        try {
-          wasm = WasmDatabase.importSnapshot(snapshot);
-        } catch (err) {
-          console.warn(
-            `[grafeo-web] Persisted snapshot for "${options.persist}" is incompatible with this WASM version (likely a storage-format change). Starting with a fresh database. The incompatible snapshot has been kept under the key "${options.persist}__backup".`,
-            err,
-          );
-          const backupPersistence = new PersistenceManager(
-            `${options.persist}__backup`,
-          );
-          await backupPersistence.save(snapshot);
-          wasm = new WasmDatabase();
-          await persistence.clear();
-        }
-      } else {
-        wasm = new WasmDatabase();
-      }
+      wasm = await openPersisted(
+        options.persist,
+        persistence,
+        WasmDatabase.version(),
+        (snapshot) => WasmDatabase.importSnapshot(snapshot),
+        () => new WasmDatabase(),
+      );
     } else {
       wasm = new WasmDatabase();
     }
@@ -111,9 +120,12 @@ export class GrafeoDB {
   }
 
   /** Executes a GQL query and returns raw columns, rows, and metadata. */
-  async executeRaw(query: string): Promise<RawQueryResult> {
+  async executeRaw(query: string, options?: LiteExecuteOptions): Promise<RawQueryResult> {
     this.assertOpen();
-    const result = this.wasm!.executeRaw(query);
+    const params = options?.params;
+    const result = params
+      ? this.wasm!.executeRawWithParams(query, params)
+      : this.wasm!.executeRaw(query);
 
     if (this.persistence && !this.wasm!.isTransactionActive()) {
       this.persistence.scheduleSave(() => this.wasm!.exportSnapshot());
@@ -132,6 +144,18 @@ export class GrafeoDB {
   async edgeCount(): Promise<number> {
     this.assertOpen();
     return this.wasm!.edgeCount();
+  }
+
+  /**
+   * Returns the edges of a node as `[neighborId, edgeId]` pairs, without a
+   * query. Reads through the open transaction when there is one; a node
+   * that does not exist has none.
+   *
+   * @param options - `direction` (`'out'` by default, `'in'` or `'both'`) and `edgeTypes`.
+   */
+  async getNodeEdges(id: number, options?: NodeEdgesOptions): Promise<NodeEdge[]> {
+    this.assertOpen();
+    return this.wasm!.getNodeEdges(id, options);
   }
 
   /** Returns schema information (labels, edge types, property keys). */
@@ -197,6 +221,23 @@ export class GrafeoDB {
   async currentSchema(): Promise<string | undefined> {
     this.assertOpen();
     return this.wasm!.currentSchema();
+  }
+
+  /**
+   * Drops the old row versions no open transaction can see any more and
+   * reports what it did.
+   *
+   * @throws With Grafeo 0.6.0-beta.1, whose `compact()` panics in WebAssembly:
+   *   the call is refused and the database stays usable.
+   */
+  async compact(): Promise<CompactReport> {
+    this.assertOpen();
+    assertCompactWorks(WasmDatabase.version());
+    const report = this.wasm!.compact() as CompactReport;
+    if (this.persistence && !this.wasm!.isTransactionActive()) {
+      this.persistence.scheduleSave(() => this.wasm!.exportSnapshot());
+    }
+    return report;
   }
 
   /** Clears the query plan cache. */

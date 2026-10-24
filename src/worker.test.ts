@@ -114,6 +114,42 @@ describe('Worker message handler', () => {
       const result = res.result as { columns: string[] };
       expect(result.columns).toContain('p.name');
     });
+
+    it('executes raw with params, with and without a language', async () => {
+      const proto = MockDatabase.prototype as unknown as Record<string, (...a: unknown[]) => unknown>;
+      const plain = vi.spyOn(proto, 'executeRawWithParams');
+      const withLang = vi.spyOn(proto, 'executeRawWithLanguageAndParams');
+      try {
+        await send('executeRaw', ['MATCH (p:Person) RETURN p.name', { params: { name: 'Alix' } }], 3);
+        expect(plain).toHaveBeenCalledWith('MATCH (p:Person) RETURN p.name', { name: 'Alix' });
+        await send('executeRaw', ['MATCH (p:Person) RETURN p.name', { language: 'cypher', params: { a: 1 } }], 4);
+        expect(withLang).toHaveBeenCalledWith('MATCH (p:Person) RETURN p.name', 'cypher', { a: 1 });
+      } finally {
+        plain.mockRestore();
+        withLang.mockRestore();
+      }
+    });
+  });
+
+  describe('text index options and search filters', () => {
+    it('passes them to the engine', async () => {
+      const proto = MockDatabase.prototype as unknown as Record<string, (...a: unknown[]) => unknown>;
+      const create = vi.spyOn(proto, 'createTextIndex');
+      const text = vi.spyOn(proto, 'textSearch');
+      const hybrid = vi.spyOn(proto, 'hybridSearch');
+      try {
+        await send('createTextIndex', ['Doc', 'body', { tokenizer: 'standard' }], 2);
+        await send('textSearch', ['Doc', 'body', 'graph', 5, { filters: { city: 'Berlin' } }], 3);
+        await send('hybridSearch', ['Doc', 'body', 'emb', 'graph', 5, { filters: { x: 1 } }], 4);
+        expect(create).toHaveBeenCalledWith('Doc', 'body', { tokenizer: 'standard' });
+        expect(text).toHaveBeenCalledWith('Doc', 'body', 'graph', 5, { filters: { city: 'Berlin' } });
+        expect(hybrid).toHaveBeenCalledWith('Doc', 'body', 'emb', 'graph', 5, { filters: { x: 1 } });
+      } finally {
+        create.mockRestore();
+        text.mockRestore();
+        hybrid.mockRestore();
+      }
+    });
   });
 
   describe('nodeCount / edgeCount', () => {
@@ -246,9 +282,25 @@ describe('Worker message handler', () => {
   });
 
   describe('compact', () => {
-    it('compact succeeds', async () => {
+    it('compact returns the engine report', async () => {
       const res = await send('compact', [], 2);
       expect(res.error).toBeUndefined();
+      expect(res.result).toEqual({ checkpointed: false, versions_collected: 0, rows_compressed: 0, duration_ms: 0 });
+    });
+
+    it('refuses on an engine whose compact() panics, and the database stays usable', async () => {
+      const versionSpy = vi.spyOn(MockDatabase, 'version').mockReturnValue('0.6.0-beta.1');
+      const compactSpy = vi.spyOn(MockDatabase.prototype, 'compact');
+      try {
+        const res = await send('compact', [], 2);
+        expect(res.error).toContain('compact() is not available with Grafeo 0.6.0-beta.1');
+        expect(compactSpy).not.toHaveBeenCalled();
+        expect((await send('execute', ["INSERT (:Person {name: 'Alix'})"], 3)).error).toBeUndefined();
+        expect((await send('nodeCount', [], 4)).result).toBe(1);
+      } finally {
+        versionSpy.mockRestore();
+        compactSpy.mockRestore();
+      }
     });
 
     it('compact with persistence triggers save', async () => {
@@ -289,6 +341,11 @@ describe('Worker message handler', () => {
           expect.stringContaining('incompatible with this WASM version'),
           expect.any(Error),
         );
+
+        // Kept, not deleted: worker mode backs the snapshot up like direct mode.
+        const backupPm = new PersistenceManager('worker-migration-test__backup');
+        expect(await backupPm.load()).toBeInstanceOf(Uint8Array);
+        await backupPm.clear();
 
         await send('close', [], 95);
       } finally {
@@ -587,6 +644,23 @@ describe('Worker message handler', () => {
       expect(res.error).toBe('edges[0].target index 5 out of bounds (0..1)');
     });
 
+    it.each([
+      ['batchCreateNodesWithProps', 'direct-api'],
+      ['batchCreateEdges', 'direct-api'],
+      ['upsertNodes', 'direct-api'],
+      ['upsertEdges', 'direct-api'],
+      ['batchVectorSearch', 'vector-index'],
+    ] as const)('%s reports a missing %s feature', async (method, feature) => {
+      const original = MockDatabase.prototype[method];
+      Object.defineProperty(MockDatabase.prototype, method, { value: undefined, configurable: true, writable: true });
+      try {
+        const res = await send(method, []);
+        expect(res.error).toBe(`${method}() requires @grafeo-db/wasm built with the '${feature}' feature`);
+      } finally {
+        Object.defineProperty(MockDatabase.prototype, method, { value: original, configurable: true, writable: true });
+      }
+    });
+
     it('importRdf reports a missing rdf feature', async () => {
       const original = MockDatabase.prototype.importRdf;
       Object.defineProperty(MockDatabase.prototype, 'importRdf', { value: undefined, configurable: true, writable: true });
@@ -675,6 +749,14 @@ describe('Worker message handler', () => {
         method: 'importRdf',
         args: [{ triples: [{ subject: 'http://ex/a', predicate: 'http://ex/p', object: 'http://ex/b' }] }],
       },
+      { method: 'batchCreateNodesWithProps', args: ['Person', [{ name: 'Alix' }]] },
+      {
+        method: 'batchCreateEdges',
+        setup: [['batchCreateNodesWithProps', ['Person', [{}, {}]]]],
+        args: [[{ src: 0, dst: 1, type: 'KNOWS' }]],
+      },
+      { method: 'upsertNodes', args: ['Person', [{ id: 'a' }]] },
+      { method: 'upsertEdges', args: ['KNOWS', [{ id: 'e', src: 'a', dst: 'b' }]] },
       {
         method: 'commitTransaction',
         setup: [['beginTransaction', []], ['execute', ["INSERT (:Person {name: 'Alix'})"]]],
@@ -715,7 +797,8 @@ describe('Worker message handler', () => {
       'createProjection', 'dropProjection', 'listProjections', 'setSchema', 'resetSchema',
       'currentSchema', 'compact', 'clearPlanCache', 'memoryUsage', 'info', 'importRows',
       'importLpg', 'importRdf', 'beginTransaction', 'commitTransaction', 'rollbackTransaction',
-      'isTransactionActive', 'signedExport', 'signedImport',
+      'isTransactionActive', 'signedExport', 'signedImport', 'getNodeEdges', 'batchVectorSearch',
+      'batchCreateNodesWithProps', 'batchCreateEdges', 'upsertNodes', 'upsertEdges',
     ];
 
     it.each(methods)('%s reports "Database not initialized" after close', async (method) => {
@@ -734,6 +817,22 @@ describe('Worker message handler', () => {
     it('returns error for invalid query', async () => {
       const res = await send('execute', ['INVALID QUERY'], 2);
       expect(res.error).toBeDefined();
+      expect(res.errorInfo).toBeUndefined();
+    });
+
+    it('sends the error name and gqlStatus along with the message', async () => {
+      const spy = vi.spyOn(MockDatabase.prototype, 'execute').mockImplementation(() => {
+        const err = new TypeError('GRAFEO-Q006: division by zero: 10 / 0');
+        (err as TypeError & { gqlStatus?: string }).gqlStatus = '22012';
+        throw err;
+      });
+      try {
+        const res = await send('execute', ['RETURN 10 / 0'], 2);
+        expect(res.error).toBe('GRAFEO-Q006: division by zero: 10 / 0');
+        expect(res.errorInfo).toEqual({ name: 'TypeError', gqlStatus: '22012' });
+      } finally {
+        spy.mockRestore();
+      }
     });
   });
 });
