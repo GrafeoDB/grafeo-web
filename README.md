@@ -30,7 +30,7 @@ npm install @grafeo-db/web
 
 ### Requirements
 
-- `@grafeo-db/web` versions in lockstep with [Grafeo](https://github.com/GrafeoDB/grafeo): 0.6.0 depends on exactly `@grafeo-db/wasm` and `@grafeo-db/wasm-lite` 0.6.0, installed with it. Do not add another version of either to your app.
+- `@grafeo-db/web` versions in lockstep with [Grafeo](https://github.com/GrafeoDB/grafeo): 0.6.1 depends on exactly `@grafeo-db/wasm` and `@grafeo-db/wasm-lite` 0.6.1, installed with it. Do not add another version of either to your app.
 - A browser with WebAssembly, ES modules in workers, and IndexedDB (see [Browser Support](#browser-support)).
 - A bundler that handles `.wasm` imports of ES modules (Vite with `vite-plugin-wasm`, webpack 5 with `experiments.asyncWebAssembly`, and the like): the engine packages are wasm-pack `bundler` builds.
 - Node.js 22 or later to build and test this package.
@@ -65,7 +65,7 @@ for (const row of result) {
 }
 
 // Check version
-console.log(GrafeoDB.version()); // e.g. "0.6.0"
+console.log(GrafeoDB.version()); // e.g. "0.6.1"
 
 // Cleanup
 await db.close();
@@ -118,7 +118,8 @@ Parameters work with all query languages, with `execute()` and `executeRaw()`, a
 | `db.nodeCount()`                 | Number of nodes                                                             |
 | `db.edgeCount()`                 | Number of edges                                                             |
 | `db.getNodeEdges(id, options?)`  | A node's edges as `[neighborId, edgeId]` pairs (`{ direction, edgeTypes }`) |
-| `db.schema()`                    | Schema info: labels, edge types, property keys                              |
+| `db.detachDeleteNode(id)`        | Delete a node with its edges; `false` if it does not exist                  |
+| `db.schema()`                    | Labels, edge types, property keys, value types, labels an edge type connects |
 | `db.memoryUsage()`               | Hierarchical WASM heap usage breakdown                                      |
 | `db.setSchema(name)`             | Set current schema context                                                  |
 | `db.resetSchema()`               | Clear current schema context                                                |
@@ -224,6 +225,14 @@ const result = await db.execute(`MATCH (u:User) RETURN u.name`);
 
 Persistence triggers after every query execution (the debounce interval prevents excessive writes).
 
+### Upgrading from 0.6.0
+
+Databases that `@grafeo-db/web` 0.6.0 persisted load in 0.6.1 without any step on your side: the IndexedDB layout and the snapshot format (v5) are unchanged.
+
+- **A named vector index has no way back to 0.6.0**: 0.6.0 refuses a snapshot that holds a vector index created with a name (`CREATE VECTOR INDEX doc_emb ON :Doc(emb) ...`), keeps it under `<key>__backup` and starts empty. Other snapshots of 0.6.1, those with an index from `createVectorIndex()` included, still load in 0.6.0.
+- **Some queries now fail** where 0.6.0 answered with a wrong value: see Changed in the [CHANGELOG](CHANGELOG.md). A `CAST` of text that is no number fails with `22018`, a GQL `{3,1}` is a syntax error, an undeclared SPARQL prefix (other than `rdf`, `rdfs`, `xsd`, `owl` and `fn`) too, and `SERIALIZABLE` is refused with `GRAFEO-Q004`.
+- **`COMMIT`, `ROLLBACK` and `START TRANSACTION` fail with `25000` inside `beginTransaction()`**: end it with `commitTransaction()` or `rollbackTransaction()`.
+
 ### Upgrading from 0.5
 
 Databases that `@grafeo-db/web` 0.5.x persisted load in 0.6 without any step on your side: the IndexedDB layout is unchanged, and Grafeo 0.6 still reads the v4 snapshots 0.5.x stored. The first save after the upgrade writes the format of Grafeo 0.6.0 (snapshot v5, which also keeps index and constraint names and text and vector index options).
@@ -275,7 +284,7 @@ const result = await db.execute(`MATCH (a)-[*1..5]->(b) RETURN count(*)`);
 
 ### Worker client
 
-`@grafeo-db/web` imports the engine for direct mode, and the engine package starts fetching and compiling its 4 MB of WebAssembly as soon as it is imported, also when every query then runs in a worker. If your app only uses worker mode, import the worker client instead: the same `GrafeoDB` API, always in a worker, and the engine is loaded by the worker alone.
+`@grafeo-db/web` imports the engine for direct mode, and the engine package starts fetching and compiling its 5 MB of WebAssembly as soon as it is imported, also when every query then runs in a worker. If your app only uses worker mode, import the worker client instead: the same `GrafeoDB` API, always in a worker, and the engine is loaded by the worker alone.
 
 ```typescript
 import { GrafeoDB } from '@grafeo-db/web/worker-client';

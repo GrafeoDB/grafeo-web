@@ -82,6 +82,7 @@ describe('lifecycle & resource management', () => {
       () => db.info(),
       () => db.importRows([], { mode: 'nodes', label: 'X' }),
       () => db.importLpg({ nodes: [], edges: [] }),
+      () => db.detachDeleteNode(0),
     ];
 
     for (const fn of methods) {

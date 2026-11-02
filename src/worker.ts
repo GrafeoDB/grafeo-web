@@ -200,6 +200,16 @@ async function handleMessage(request: WorkerRequest): Promise<void> {
         break;
       }
 
+      case 'detachDeleteNode': {
+        if (!db) throw new Error('Database not initialized');
+        const deleted = db.detachDeleteNode(args[0] as number);
+        if (persistence && !db!.isTransactionActive()) {
+          persistence.scheduleSave(() => db!.exportSnapshot());
+        }
+        respond(id, deleted);
+        break;
+      }
+
       case 'export': {
         if (!db) throw new Error('Database not initialized');
         const data = db.exportSnapshot();
@@ -540,9 +550,14 @@ async function handleMessage(request: WorkerRequest): Promise<void> {
 
       case 'commitTransaction': {
         if (!db) throw new Error('Database not initialized');
-        db.commitTransaction();
-        if (persistence) {
-          persistence.scheduleSave(() => db!.exportSnapshot());
+        try {
+          db.commitTransaction();
+        } finally {
+          // A commit that fails ends the transaction too, and beginTransaction
+          // cancelled any pending save of the writes before it.
+          if (persistence && !db!.isTransactionActive()) {
+            persistence.scheduleSave(() => db!.exportSnapshot());
+          }
         }
         respond(id);
         break;

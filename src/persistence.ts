@@ -176,7 +176,7 @@ const SIGNED_MAGIC = [0x47, 0x53, 0x4e, 0x31]; // "GSN1"
 
 /**
  * Names the engine snapshot format of `data` for messages: `v4` (Grafeo
- * 0.5.x and 0.6.0-beta.1), `v5` (Grafeo 0.6.0), `signed v4`, and so on.
+ * 0.5.x and 0.6.0-beta.1), `v5` (Grafeo 0.6.0 and 0.6.1), `signed v4`, and so on.
  * The engine writes its format version in the first byte, after the `GSN1`
  * header for a signed snapshot.
  */

@@ -2,7 +2,7 @@
  * Mock for @grafeo-db/wasm used in tests.
  *
  * Simulates a basic in-memory graph database with INSERT/MATCH support.
- * Matches the WASM 0.6.0 API surface.
+ * Matches the WASM 0.6.1 API surface.
  */
 
 interface Node {
@@ -15,6 +15,26 @@ interface Edge {
   sourceIdx: number;
   targetIdx: number;
   properties: Record<string, unknown>;
+}
+
+/** The schema() name of a property's value type. */
+function typeName(value: unknown): string {
+  if (typeof value === 'string') return 'STRING';
+  if (typeof value === 'boolean') return 'BOOL';
+  if (typeof value === 'number') return Number.isInteger(value) ? 'INT64' : 'FLOAT64';
+  return Array.isArray(value) ? 'LIST' : 'MAP';
+}
+
+/** The schema() properties of these elements, sorted by name. */
+function schemaProperties(elements: { properties: Record<string, unknown> }[]) {
+  const types = new Map<string, Set<string>>();
+  for (const { properties } of elements) {
+    for (const [name, value] of Object.entries(properties)) {
+      if (!types.has(name)) types.set(name, new Set());
+      types.get(name)!.add(typeName(value));
+    }
+  }
+  return [...types.keys()].sort().map((name) => ({ name, types: [...types.get(name)!].sort() }));
 }
 
 export class Database {
@@ -359,17 +379,42 @@ export class Database {
     return this.edges.length;
   }
 
+  detachDeleteNode(id: number): boolean {
+    this.assertNotFreed();
+    if (!Number.isSafeInteger(id) || id < 0) {
+      throw new Error(`${id} is not a node ID`);
+    }
+    if (id >= this.nodes.length) return false;
+    this.nodes.splice(id, 1);
+    this.edges = this.edges
+      .filter((e) => e.sourceIdx !== id && e.targetIdx !== id)
+      .map((e) => ({
+        ...e,
+        sourceIdx: e.sourceIdx > id ? e.sourceIdx - 1 : e.sourceIdx,
+        targetIdx: e.targetIdx > id ? e.targetIdx - 1 : e.targetIdx,
+      }));
+    return true;
+  }
+
   schema(): unknown {
     this.assertNotFreed();
-    const labelSet = [...new Set(this.nodes.flatMap((n) => n.labels))];
-    const labels = labelSet.map((name) => ({
-      name,
-      count: this.nodes.filter((n) => n.labels.includes(name)).length,
-    }));
-    const edge_types = [...new Set(this.edges.map((e) => e.type))].map((name) => ({
-      name,
-      count: this.edges.filter((e) => e.type === name).length,
-    }));
+    const labelSet = [...new Set(this.nodes.flatMap((n) => n.labels))].sort();
+    const labels = labelSet.map((name) => {
+      const nodes = this.nodes.filter((n) => n.labels.includes(name));
+      return { name, count: nodes.length, properties: schemaProperties(nodes) };
+    });
+    const edge_types = [...new Set(this.edges.map((e) => e.type))].sort().map((name) => {
+      const edges = this.edges.filter((e) => e.type === name);
+      const endpoints = new Map<string, { source: string; target: string; count: number }>();
+      for (const edge of edges) {
+        const source = this.nodes[edge.sourceIdx].labels[0];
+        const target = this.nodes[edge.targetIdx].labels[0];
+        const endpoint = endpoints.get(`${source}->${target}`) ?? { source, target, count: 0 };
+        endpoint.count += 1;
+        endpoints.set(`${source}->${target}`, endpoint);
+      }
+      return { name, count: edges.length, properties: schemaProperties(edges), endpoints: [...endpoints.values()] };
+    });
     const property_keys = [
       ...new Set(this.nodes.flatMap((n) => Object.keys(n.properties))),
     ];
@@ -430,13 +475,13 @@ export class Database {
       is_persistent: false,
       path: null,
       wal_enabled: false,
-      version: '0.6.0-mock',
+      version: '0.6.1-mock',
       features: ['gql'],
     };
   }
 
   static version(): string {
-    return '0.6.0-mock';
+    return '0.6.1-mock';
   }
 
   exportSnapshot(): Uint8Array {

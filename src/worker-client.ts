@@ -43,8 +43,10 @@ import type {
   RdfLiteral,
   RdfTriple,
   SchemaEdgeType,
+  SchemaEndpoint,
   SchemaInfo,
   SchemaLabel,
+  SchemaProperty,
   SearchResult,
   StorageStats,
   TextIndexOptions,
@@ -82,8 +84,10 @@ export type {
   RdfLiteral,
   RdfTriple,
   SchemaEdgeType,
+  SchemaEndpoint,
   SchemaInfo,
   SchemaLabel,
+  SchemaProperty,
   SearchResult,
   StorageStats,
   TextIndexOptions,
@@ -171,7 +175,22 @@ export class GrafeoDB {
     return this.open().getNodeEdges(id, options);
   }
 
-  /** Returns schema information (labels, edge types, property keys). */
+  /**
+   * Deletes a node and all its edges in one call. Runs in the open transaction
+   * when there is one, so it can be rolled back.
+   *
+   * @returns `false` if the node does not exist.
+   * @throws If `id` is not a nonnegative safe integer.
+   */
+  async detachDeleteNode(id: number): Promise<boolean> {
+    return this.open().detachDeleteNode(id);
+  }
+
+  /**
+   * Returns schema information: the labels, edge types and property keys in
+   * use, sorted by name, with each label's and edge type's properties and
+   * value types and the labels each edge type connects. Reads the whole graph.
+   */
   async schema(): Promise<SchemaInfo> {
     return this.open().schema();
   }

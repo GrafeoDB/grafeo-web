@@ -460,6 +460,52 @@ describe('Worker message handler', () => {
       await send('close', [], 244);
     });
 
+    // Grafeo 0.6.1: a commit that fails ends the transaction. beginTransaction
+    // cancelled any pending save of the writes before it, so they need a new one.
+    it('a failed commit schedules a save of the writes before the transaction', async () => {
+      const key = 'worker-tx-failed-commit';
+      await send('init', [{ persist: key }]);
+      await send('execute', ["INSERT (:Person {name: 'Alix'})"]);
+      await send('beginTransaction', []);
+      const commitSpy = vi.spyOn(MockDatabase.prototype, 'commitTransaction').mockImplementationOnce(function (
+        this: MockDatabase,
+      ) {
+        this.rollbackTransaction();
+        throw new Error('write conflict');
+      });
+      const saveSpy = vi.spyOn(PersistenceManager.prototype, 'scheduleSave');
+      try {
+        expect((await send('commitTransaction', [])).error).toBe('write conflict');
+        expect((await send('isTransactionActive', [])).result).toBe(false);
+        expect(saveSpy).toHaveBeenCalledTimes(1);
+      } finally {
+        commitSpy.mockRestore();
+        saveSpy.mockRestore();
+        await send('close', []);
+        await new PersistenceManager(key).clear();
+      }
+    });
+
+    it('a commit that fails and leaves the transaction open schedules no save', async () => {
+      const key = 'worker-tx-failed-commit-open';
+      await send('init', [{ persist: key }]);
+      await send('beginTransaction', []);
+      const commitSpy = vi.spyOn(MockDatabase.prototype, 'commitTransaction').mockImplementationOnce(() => {
+        throw new Error('refused');
+      });
+      const saveSpy = vi.spyOn(PersistenceManager.prototype, 'scheduleSave');
+      try {
+        expect((await send('commitTransaction', [])).error).toBe('refused');
+        expect((await send('isTransactionActive', [])).result).toBe(true);
+        expect(saveSpy).not.toHaveBeenCalled();
+      } finally {
+        commitSpy.mockRestore();
+        saveSpy.mockRestore();
+        await send('close', []);
+        await new PersistenceManager(key).clear();
+      }
+    });
+
     it('rollback with persistence schedules save (post-rollback state must land on disk)', async () => {
       await send('init', [{ persist: 'worker-tx-rollback-persist' }], 250);
       await send('beginTransaction', [], 251);
@@ -755,6 +801,7 @@ describe('Worker message handler', () => {
         setup: [['batchCreateNodesWithProps', ['Person', [{}, {}]]]],
         args: [[{ src: 0, dst: 1, type: 'KNOWS' }]],
       },
+      { method: 'detachDeleteNode', setup: [['execute', ["INSERT (:Person {name: 'Alix'})"]]], args: [0] },
       { method: 'upsertNodes', args: ['Person', [{ id: 'a' }]] },
       { method: 'upsertEdges', args: ['KNOWS', [{ id: 'e', src: 'a', dst: 'b' }]] },
       {
@@ -798,7 +845,7 @@ describe('Worker message handler', () => {
       'currentSchema', 'compact', 'clearPlanCache', 'memoryUsage', 'info', 'importRows',
       'importLpg', 'importRdf', 'beginTransaction', 'commitTransaction', 'rollbackTransaction',
       'isTransactionActive', 'signedExport', 'signedImport', 'getNodeEdges', 'batchVectorSearch',
-      'batchCreateNodesWithProps', 'batchCreateEdges', 'upsertNodes', 'upsertEdges',
+      'batchCreateNodesWithProps', 'batchCreateEdges', 'upsertNodes', 'upsertEdges', 'detachDeleteNode',
     ];
 
     it.each(methods)('%s reports "Database not initialized" after close', async (method) => {

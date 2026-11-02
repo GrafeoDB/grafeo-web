@@ -335,16 +335,32 @@ export interface MemoryUsage {
   [key: string]: unknown;
 }
 
+/** A property of a label or edge type in schema(): its name and the types its values have, such as `'STRING'` or `'INT64'`. */
+export interface SchemaProperty {
+  name: string;
+  types: string[];
+}
+
+/** A pair of labels an edge type connects in schema(), and the number of its edges between them. */
+export interface SchemaEndpoint {
+  source: string;
+  target: string;
+  count: number;
+}
+
 /** A label entry returned by schema(). */
 export interface SchemaLabel {
   name: string;
   count: number;
+  properties: SchemaProperty[];
 }
 
 /** An edge type entry returned by schema(). */
 export interface SchemaEdgeType {
   name: string;
   count: number;
+  properties: SchemaProperty[];
+  endpoints: SchemaEndpoint[];
 }
 
 /** Schema information returned by schema(). */

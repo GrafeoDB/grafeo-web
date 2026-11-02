@@ -480,6 +480,7 @@ describe('GrafeoDB', () => {
       expect(Array.isArray(schema.labels)).toBe(true);
       expect(schema.labels[0]).toHaveProperty('name');
       expect(schema.labels[0]).toHaveProperty('count');
+      expect(schema.labels[0]).toHaveProperty('properties');
     });
   });
 
@@ -816,6 +817,30 @@ describe('GrafeoDB', () => {
     });
   });
 
+  describe('detachDeleteNode() (0.6.1)', () => {
+    it('deletes the node with its edges and says whether it was there', async () => {
+      await db.batchCreateNodesWithProps('Person', [{ name: 'Alix' }, { name: 'Gus' }]);
+      await db.batchCreateEdges([{ src: 0, dst: 1, type: 'KNOWS' }]);
+      expect(await db.detachDeleteNode(0)).toBe(true);
+      expect(await db.nodeCount()).toBe(1);
+      expect(await db.edgeCount()).toBe(0);
+      expect(await db.detachDeleteNode(42)).toBe(false);
+    });
+
+    it('runs in the open transaction', async () => {
+      await db.execute("INSERT (:Person {name: 'Alix'})");
+      await db.beginTransaction();
+      expect(await db.detachDeleteNode(0)).toBe(true);
+      await db.rollbackTransaction();
+      expect(await db.nodeCount()).toBe(1);
+    });
+
+    it('refuses what is no node ID', async () => {
+      await expect(db.detachDeleteNode(-1)).rejects.toThrow('-1 is not a node ID');
+      await expect(db.detachDeleteNode(1.5)).rejects.toThrow('1.5 is not a node ID');
+    });
+  });
+
   describe('batchVectorSearch() (0.6)', () => {
     it('returns one result list per query', async () => {
       const results = await db.batchVectorSearch('Doc', 'emb', [new Float32Array([1, 0]), [0, 1]], 3);
@@ -1017,6 +1042,52 @@ describe('GrafeoDB', () => {
       }
     });
 
+    // Grafeo 0.6.1: a commit that fails ends the transaction. beginTransaction()
+    // cancelled any pending save of the writes before it, so they need a new one.
+    it('a failed commit schedules a save of the writes before the transaction', async () => {
+      const pdb = await GrafeoDB.create({ persist: 'tx-failed-commit' });
+      try {
+        const persistence = getPersistence(pdb);
+        await pdb.execute("INSERT (:Person {name: 'Alix'})");
+        await pdb.beginTransaction();
+        const wasm = (pdb as unknown as { wasm: { commitTransaction(): void; rollbackTransaction(): void } }).wasm;
+        vi.spyOn(wasm, 'commitTransaction').mockImplementationOnce(() => {
+          wasm.rollbackTransaction();
+          throw new Error('write conflict');
+        });
+        const saveSpy = vi.spyOn(persistence, 'scheduleSave');
+        await expect(pdb.commitTransaction()).rejects.toThrow('write conflict');
+        expect(await pdb.isTransactionActive()).toBe(false);
+        expect(saveSpy).toHaveBeenCalledTimes(1);
+        saveSpy.mockRestore();
+      } finally {
+        await pdb.close();
+        const { PersistenceManager } = await import('./persistence');
+        await new PersistenceManager('tx-failed-commit').clear();
+      }
+    });
+
+    it('a commit that fails and leaves the transaction open schedules no save', async () => {
+      const pdb = await GrafeoDB.create({ persist: 'tx-failed-commit-open' });
+      try {
+        const persistence = getPersistence(pdb);
+        await pdb.beginTransaction();
+        const wasm = (pdb as unknown as { wasm: { commitTransaction(): void } }).wasm;
+        vi.spyOn(wasm, 'commitTransaction').mockImplementationOnce(() => {
+          throw new Error('refused');
+        });
+        const saveSpy = vi.spyOn(persistence, 'scheduleSave');
+        await expect(pdb.commitTransaction()).rejects.toThrow('refused');
+        expect(await pdb.isTransactionActive()).toBe(true);
+        expect(saveSpy).not.toHaveBeenCalled();
+        saveSpy.mockRestore();
+      } finally {
+        await pdb.close();
+        const { PersistenceManager } = await import('./persistence');
+        await new PersistenceManager('tx-failed-commit-open').clear();
+      }
+    });
+
     it('rollbackTransaction() calls scheduleSave (post-rollback state must land on disk)', async () => {
       const pdb = await GrafeoDB.create({ persist: 'tx-defer-rollback' });
       try {
@@ -1165,6 +1236,11 @@ describe('GrafeoDB', () => {
         name: 'batchCreateEdges',
         setup: (d) => d.batchCreateNodesWithProps('Person', [{}, {}]),
         write: (d) => d.batchCreateEdges([{ src: 0, dst: 1, type: 'KNOWS' }]),
+      },
+      {
+        name: 'detachDeleteNode',
+        setup: (d) => d.execute("INSERT (:Person {name: 'Alix'})"),
+        write: (d) => d.detachDeleteNode(0),
       },
       { name: 'upsertNodes', write: (d) => d.upsertNodes('Person', [{ id: 'a' }]) },
       { name: 'upsertEdges', write: (d) => d.upsertEdges('KNOWS', [{ id: 'e', src: 'a', dst: 'b' }]) },
@@ -1692,6 +1768,7 @@ describe('GrafeoDB (worker mode)', () => {
       args: [0, { direction: 'both' }],
       result: [[1, 0]],
     },
+    { method: 'detachDeleteNode', call: (d) => d.detachDeleteNode(3), args: [3], result: true },
     {
       method: 'batchCreateNodesWithProps',
       call: (d) => d.batchCreateNodesWithProps(['Person'], [{ name: 'Alix' }]),
