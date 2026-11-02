@@ -683,9 +683,11 @@ describe('GrafeoDB (lite) on the 0.6 engine API', () => {
 
   it('detachDeleteNode() deletes the node with its edges and says whether it was there', async () => {
     const db = await GrafeoDB.create();
-    await db.execute("INSERT (:Person {name: 'Alix'})");
+    await db.execute("INSERT (:Person {name: 'Alix'})-[:KNOWS]->(:Person {name: 'Gus'})");
+    expect(await db.edgeCount()).toBe(1);
     expect(await db.detachDeleteNode(0)).toBe(true);
-    expect(await db.nodeCount()).toBe(0);
+    expect(await db.nodeCount()).toBe(1);
+    expect(await db.edgeCount()).toBe(0);
     expect(await db.detachDeleteNode(0)).toBe(false);
     await db.close();
   });

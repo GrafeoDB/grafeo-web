@@ -484,6 +484,36 @@ describe('GrafeoDB', () => {
     });
   });
 
+  describe('schema() of an INSERT with an edge property', () => {
+    it('lists the edge with its properties and endpoints, and its keys among the property keys', async () => {
+      await db.execute("INSERT (:Person {name: 'Alix'})-[:KNOWS {since: 2020}]->(:Person {name: 'Gus'})");
+      expect(await db.schema()).toEqual({
+        mode: 'lpg',
+        labels: [{ name: 'Person', count: 2, properties: [{ name: 'name', types: ['STRING'] }] }],
+        edge_types: [
+          {
+            name: 'KNOWS',
+            count: 1,
+            properties: [{ name: 'since', types: ['INT64'] }],
+            endpoints: [{ source: 'Person', target: 'Person', count: 1 }],
+          },
+        ],
+        property_keys: ['name', 'since'],
+      });
+    });
+
+    it('leaves out what was deleted', async () => {
+      await db.execute("INSERT (:Person {name: 'Alix'})-[:KNOWS {since: 2020}]->(:Person {name: 'Gus'})");
+      await db.detachDeleteNode(0);
+      expect(await db.schema()).toEqual({
+        mode: 'lpg',
+        labels: [{ name: 'Person', count: 1, properties: [{ name: 'name', types: ['STRING'] }] }],
+        edge_types: [],
+        property_keys: ['name'],
+      });
+    });
+  });
+
   describe('schema context', () => {
     it('setSchema/currentSchema/resetSchema round-trips', async () => {
       expect(await db.currentSchema()).toBeUndefined();
@@ -833,6 +863,30 @@ describe('GrafeoDB', () => {
       expect(await db.detachDeleteNode(0)).toBe(true);
       await db.rollbackTransaction();
       expect(await db.nodeCount()).toBe(1);
+    });
+
+    it('keeps the IDs of the other nodes and edges, and never reuses the deleted one', async () => {
+      await db.batchCreateNodesWithProps('Person', [{ name: 'Alix' }, { name: 'Gus' }, { name: 'Vincent' }]);
+      await db.batchCreateEdges([
+        { src: 0, dst: 1, type: 'KNOWS' },
+        { src: 1, dst: 2, type: 'KNOWS' },
+      ]);
+      expect(await db.detachDeleteNode(0)).toBe(true);
+      expect(await db.detachDeleteNode(0)).toBe(false);
+      expect(await db.getNodeEdges(1)).toEqual([[2, 1]]);
+      expect(await db.batchCreateNodesWithProps('Person', [{ name: 'Jules' }])).toEqual([3]);
+      await expect(db.batchCreateEdges([{ src: 0, dst: 1, type: 'KNOWS' }])).rejects.toThrow('Node not found: 0');
+      expect(await db.nodeCount()).toBe(3);
+      expect(await db.edgeCount()).toBe(1);
+    });
+
+    it('stays deleted through a snapshot', async () => {
+      await db.batchCreateNodesWithProps('Person', [{ name: 'Alix' }, { name: 'Gus' }]);
+      await db.detachDeleteNode(0);
+      await db.import(await db.export());
+      expect(await db.nodeCount()).toBe(1);
+      expect(await db.detachDeleteNode(0)).toBe(false);
+      expect(await db.detachDeleteNode(1)).toBe(true);
     });
 
     it('refuses what is no node ID', async () => {

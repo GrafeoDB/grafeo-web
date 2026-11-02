@@ -37,7 +37,7 @@ Catches up on Grafeo Core 0.6.1. Databases persisted by 0.6.0 load unchanged. Ne
 
 ### Compatibility
 
-- **Persisted databases carry over**: 0.6.1 still writes snapshot v5, and v4 and v5 snapshots of earlier releases load unchanged.
+- **Persisted databases carry over**: 0.6.1 still writes snapshot v5, and v4 and v5 snapshots of earlier releases load unchanged. As in 0.6.0, the lite build refuses a snapshot that holds RDF triples or text or vector indexes: it keeps it under `<key>__backup` and starts empty.
 - **Back to 0.6.0**: 0.6.0 reads the snapshots 0.6.1 writes, unless one holds a vector index created with a name (`CREATE VECTOR INDEX doc_emb ON :Doc(emb) ...`). It refuses that one, keeps it under `<key>__backup` and starts empty.
 
 ### Engine highlights (via Grafeo Core 0.6.1)

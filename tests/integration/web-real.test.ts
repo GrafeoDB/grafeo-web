@@ -243,6 +243,14 @@ describe('upgrade: databases persisted by @grafeo-db/web 0.6.0', () => {
 
     const reopened = await GrafeoDB.create({ persist: key });
     expect(await reopened.nodeCount()).toBe(6);
+    expect(await reopened.execute('SHOW INDEXES')).toContainEqual({
+      name: 'person_name',
+      type: 'Hash',
+      label: 'Person',
+      property: 'name',
+    });
+    expect((await reopened.textSearch('Doc', 'body', 'graph', 2)).map((r) => r.id)).toEqual([3]);
+    expect((await reopened.vectorSearch('Doc', 'emb', new Float32Array([1, 0, 0]), 1)).map((r) => r.id)).toEqual([3]);
     expect(await storedSnapshot(`${key}__backup`)).toBeNull();
     await reopened.clear();
     await reopened.close();
