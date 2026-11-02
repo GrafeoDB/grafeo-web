@@ -209,7 +209,7 @@ describe('upgrade: databases persisted by @grafeo-db/web 0.5.44', () => {
       const db = await GrafeoDBLite.create({ persist: key });
       expect(await db.nodeCount()).toBe(0);
       expect(warn).toHaveBeenCalledWith(
-        expect.stringMatching(/"it-upgrade-lite-refused" \(snapshot format v4\) is incompatible .*Grafeo 0\.6\.0/),
+        expect.stringMatching(/"it-upgrade-lite-refused" \(snapshot format v4\) is incompatible .*Grafeo 0\.6\.1/),
         expect.objectContaining({ message: expect.stringContaining('GRAFEO-V001') }),
       );
       expect(await storedSnapshot(`${key}__backup`)).toEqual(original);
@@ -219,6 +219,53 @@ describe('upgrade: databases persisted by @grafeo-db/web 0.5.44', () => {
       warn.mockRestore();
       await new PersistenceManager(`${key}__backup`).clear();
     }
+  });
+});
+
+describe('upgrade: databases persisted by @grafeo-db/web 0.6.0', () => {
+  it('full: opens a v5 database from IndexedDB, keeps its data and index names, and saves it again', async () => {
+    const key = 'it-upgrade-060';
+    await persistAs0544(key, await fixture('snapshot-v5-wasm-0.6.0.bin'));
+
+    const db = await GrafeoDB.create({ persist: key, persistInterval: 10 });
+    expect(await db.nodeCount()).toBe(5);
+    expect(await db.execute('SHOW INDEXES')).toContainEqual({
+      name: 'person_name',
+      type: 'Hash',
+      label: 'Person',
+      property: 'name',
+    });
+    expect((await db.textSearch('Doc', 'body', 'graph', 2)).map((r) => r.id)).toEqual([3]);
+    expect((await db.vectorSearch('Doc', 'emb', new Float32Array([1, 0, 0]), 1)).map((r) => r.id)).toEqual([3]);
+
+    await db.execute("INSERT (:Person {name: 'Vincent', age: 41})");
+    await db.close();
+
+    const reopened = await GrafeoDB.create({ persist: key });
+    expect(await reopened.nodeCount()).toBe(6);
+    expect(await reopened.execute('SHOW INDEXES')).toContainEqual({
+      name: 'person_name',
+      type: 'Hash',
+      label: 'Person',
+      property: 'name',
+    });
+    expect((await reopened.textSearch('Doc', 'body', 'graph', 2)).map((r) => r.id)).toEqual([3]);
+    expect((await reopened.vectorSearch('Doc', 'emb', new Float32Array([1, 0, 0]), 1)).map((r) => r.id)).toEqual([3]);
+    expect(await storedSnapshot(`${key}__backup`)).toBeNull();
+    await reopened.clear();
+    await reopened.close();
+  });
+
+  it('lite: opens a v5 database written by the 0.6.0 lite build', async () => {
+    const key = 'it-upgrade-lite-060';
+    await persistAs0544(key, await fixture('snapshot-v5-wasm-lite-0.6.0.bin'));
+    const db = await GrafeoDBLite.create({ persist: key });
+    expect(await db.nodeCount()).toBe(3);
+    expect(await db.execute('SHOW INDEXES')).toEqual([
+      { name: 'person_name', type: 'Hash', label: 'Person', property: 'name' },
+    ]);
+    await db.clear();
+    await db.close();
   });
 });
 
@@ -273,10 +320,52 @@ describe('0.6 engine through the wrapper', () => {
     await db.close();
   });
 
-  it('schema() lists edge types with counts', async () => {
+  it('schema() lists properties with their value types, and the labels an edge type connects', async () => {
     const db = await GrafeoDB.create();
+    await db.execute("INSERT (:Person {name: 'Alix'})-[:KNOWS {since: 2020}]->(:Person {name: 'Gus'})");
+    const schema = await db.schema();
+    expect(schema.labels).toEqual([
+      { name: 'Person', count: 2, properties: [{ name: 'name', types: ['STRING'] }] },
+    ]);
+    expect(schema.edge_types).toEqual([
+      {
+        name: 'KNOWS',
+        count: 1,
+        properties: [{ name: 'since', types: ['INT64'] }],
+        endpoints: [{ source: 'Person', target: 'Person', count: 1 }],
+      },
+    ]);
+    await db.close();
+  });
+
+  it.each([
+    ['full', () => GrafeoDB.create({ persist: 'it-detach-full', persistInterval: 10 }), () => GrafeoDB.create({ persist: 'it-detach-full' })],
+    ['lite', () => GrafeoDBLite.create({ persist: 'it-detach-lite', persistInterval: 10 }), () => GrafeoDBLite.create({ persist: 'it-detach-lite' })],
+  ])('%s: detachDeleteNode() deletes the node with its edges, and the deletion is saved', async (_name, open, reopen) => {
+    const db = await open();
     await db.execute("INSERT (:Person {name: 'Alix'})-[:KNOWS]->(:Person {name: 'Gus'})");
-    expect((await db.schema()).edge_types).toEqual([{ name: 'KNOWS', count: 1 }]);
+    await db.beginTransaction();
+    expect(await db.detachDeleteNode(0)).toBe(true);
+    await db.rollbackTransaction();
+    expect(await db.edgeCount()).toBe(1);
+    expect(await db.detachDeleteNode(0)).toBe(true);
+    expect(await db.detachDeleteNode(0)).toBe(false);
+    await db.close();
+
+    const again = await reopen();
+    expect([await again.nodeCount(), await again.edgeCount()]).toEqual([1, 0]);
+    await again.clear();
+    await again.close();
+  });
+
+  it('a statement cannot end a transaction, and the error carries its GQLSTATUS', async () => {
+    const db = await GrafeoDB.create();
+    await db.beginTransaction();
+    await expect(db.execute('COMMIT')).rejects.toMatchObject({ gqlStatus: '25000' });
+    await expect(db.beginTransaction()).rejects.toMatchObject({ gqlStatus: '25G01' });
+    expect(await db.isTransactionActive()).toBe(true);
+    await db.rollbackTransaction();
+    await expect(db.commitTransaction()).rejects.toMatchObject({ gqlStatus: '25000' });
     await db.close();
   });
 
@@ -362,7 +451,7 @@ describe('0.6 engine through the wrapper', () => {
 describe('GrafeoDB lite on real wasm-lite', () => {
   it('runs GQL and reports its version', async () => {
     const db = await GrafeoDBLite.create();
-    expect((await db.info()).version).toMatch(/^0\.6\.0($|-)/);
+    expect((await db.info()).version).toMatch(/^0\.6\.1($|-)/);
     await db.execute("INSERT (:Person {name: 'Alix'})-[:KNOWS]->(:Person {name: 'Gus'})");
     expect(await db.execute('MATCH (a)-[:KNOWS]->(b) RETURN a.name, b.name')).toEqual([
       { 'a.name': 'Alix', 'b.name': 'Gus' },

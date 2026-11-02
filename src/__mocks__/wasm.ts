@@ -2,12 +2,14 @@
  * Mock for @grafeo-db/wasm used in tests.
  *
  * Simulates a basic in-memory graph database with INSERT/MATCH support.
- * Matches the WASM 0.6.0 API surface.
+ * Matches the WASM 0.6.1 API surface.
  */
 
 interface Node {
   labels: string[];
   properties: Record<string, unknown>;
+  /** A deleted node keeps its slot: an ID is an index here, and the engine never reuses one. */
+  deleted?: boolean;
 }
 
 interface Edge {
@@ -15,6 +17,28 @@ interface Edge {
   sourceIdx: number;
   targetIdx: number;
   properties: Record<string, unknown>;
+  /** As for a node: an edge ID is an index here. */
+  deleted?: boolean;
+}
+
+/** The schema() name of a property's value type. */
+function typeName(value: unknown): string {
+  if (typeof value === 'string') return 'STRING';
+  if (typeof value === 'boolean') return 'BOOL';
+  if (typeof value === 'number') return Number.isInteger(value) ? 'INT64' : 'FLOAT64';
+  return Array.isArray(value) ? 'LIST' : 'MAP';
+}
+
+/** The schema() properties of these elements, sorted by name. */
+function schemaProperties(elements: { properties: Record<string, unknown> }[]) {
+  const types = new Map<string, Set<string>>();
+  for (const { properties } of elements) {
+    for (const [name, value] of Object.entries(properties)) {
+      if (!types.has(name)) types.set(name, new Set());
+      types.get(name)!.add(typeName(value));
+    }
+  }
+  return [...types.keys()].sort().map((name) => ({ name, types: [...types.get(name)!].sort() }));
 }
 
 export class Database {
@@ -28,6 +52,14 @@ export class Database {
 
   constructor() {
     // no-op
+  }
+
+  private get liveNodes(): Node[] {
+    return this.nodes.filter((n) => !n.deleted);
+  }
+
+  private get liveEdges(): Edge[] {
+    return this.edges.filter((e) => !e.deleted);
   }
 
   execute(query: string): Record<string, unknown>[] {
@@ -268,7 +300,7 @@ export class Database {
     this.assertNoBatchInTransaction('batchCreateEdges');
     for (const edge of edges) {
       for (const end of [edge.src, edge.dst]) {
-        if (end < 0 || end >= this.nodes.length) {
+        if (end < 0 || end >= this.nodes.length || this.nodes[end].deleted) {
           throw new Error(`GRAFEO-V002: Node not found: ${end}`);
         }
       }
@@ -299,7 +331,7 @@ export class Database {
         summary.skippedRows.push(i);
         continue;
       }
-      const match = this.nodes.find(
+      const match = this.liveNodes.find(
         (n) => labelList.every((l) => n.labels.includes(l)) && n.properties[key] === row[key],
       );
       if (match) {
@@ -328,7 +360,7 @@ export class Database {
     const direction = options?.direction ?? 'out';
     const pairs: [number, number][] = [];
     for (const [edgeId, edge] of this.edges.entries()) {
-      if (options?.edgeTypes && !options.edgeTypes.includes(edge.type)) continue;
+      if (edge.deleted || (options?.edgeTypes && !options.edgeTypes.includes(edge.type))) continue;
       if ((direction === 'out' || direction === 'both') && edge.sourceIdx === id) {
         pairs.push([edge.targetIdx, edgeId]);
       } else if ((direction === 'in' || direction === 'both') && edge.targetIdx === id) {
@@ -351,28 +383,49 @@ export class Database {
 
   nodeCount(): number {
     this.assertNotFreed();
-    return this.nodes.length;
+    return this.liveNodes.length;
   }
 
   edgeCount(): number {
     this.assertNotFreed();
-    return this.edges.length;
+    return this.liveEdges.length;
+  }
+
+  detachDeleteNode(id: number): boolean {
+    this.assertNotFreed();
+    if (!Number.isSafeInteger(id) || id < 0) {
+      throw new Error(`${id} is not a node ID`);
+    }
+    if (id >= this.nodes.length || this.nodes[id].deleted) return false;
+    this.nodes[id] = { ...this.nodes[id], deleted: true };
+    this.edges = this.edges.map((e) => (e.sourceIdx === id || e.targetIdx === id ? { ...e, deleted: true } : e));
+    return true;
   }
 
   schema(): unknown {
     this.assertNotFreed();
-    const labelSet = [...new Set(this.nodes.flatMap((n) => n.labels))];
-    const labels = labelSet.map((name) => ({
-      name,
-      count: this.nodes.filter((n) => n.labels.includes(name)).length,
-    }));
-    const edge_types = [...new Set(this.edges.map((e) => e.type))].map((name) => ({
-      name,
-      count: this.edges.filter((e) => e.type === name).length,
-    }));
+    const nodes = this.liveNodes;
+    const liveEdges = this.liveEdges;
+    const labelSet = [...new Set(nodes.flatMap((n) => n.labels))].sort();
+    const labels = labelSet.map((name) => {
+      const labeled = nodes.filter((n) => n.labels.includes(name));
+      return { name, count: labeled.length, properties: schemaProperties(labeled) };
+    });
+    const edge_types = [...new Set(liveEdges.map((e) => e.type))].sort().map((name) => {
+      const edges = liveEdges.filter((e) => e.type === name);
+      const endpoints = new Map<string, { source: string; target: string; count: number }>();
+      for (const edge of edges) {
+        const source = this.nodes[edge.sourceIdx].labels[0];
+        const target = this.nodes[edge.targetIdx].labels[0];
+        const endpoint = endpoints.get(`${source}->${target}`) ?? { source, target, count: 0 };
+        endpoint.count += 1;
+        endpoints.set(`${source}->${target}`, endpoint);
+      }
+      return { name, count: edges.length, properties: schemaProperties(edges), endpoints: [...endpoints.values()] };
+    });
     const property_keys = [
-      ...new Set(this.nodes.flatMap((n) => Object.keys(n.properties))),
-    ];
+      ...new Set([...nodes, ...liveEdges].flatMap((element) => Object.keys(element.properties))),
+    ].sort();
     return { mode: 'lpg', labels, edge_types, property_keys };
   }
 
@@ -425,18 +478,18 @@ export class Database {
     this.assertNotFreed();
     return {
       mode: 'Lpg',
-      node_count: this.nodes.length,
-      edge_count: this.edges.length,
+      node_count: this.liveNodes.length,
+      edge_count: this.liveEdges.length,
       is_persistent: false,
       path: null,
       wal_enabled: false,
-      version: '0.6.0-mock',
+      version: '0.6.1-mock',
       features: ['gql'],
     };
   }
 
   static version(): string {
-    return '0.6.0-mock';
+    return '0.6.1-mock';
   }
 
   exportSnapshot(): Uint8Array {
@@ -584,8 +637,8 @@ export class Database {
       this.nodes.push({ labels: [label], properties });
     }
 
-    // Parse edges: -[:TYPE]->
-    const edgePattern = /-\[:(\w+)\]->/g;
+    // Parse edges: -[:TYPE]-> or -[:TYPE {key: 'value', ...}]->
+    const edgePattern = /-\[:(\w+)(?:\s*\{([^}]*)\})?\]->/g;
     while ((match = edgePattern.exec(query)) !== null) {
       const type = match[1];
       // Connect the last two nodes
@@ -594,7 +647,7 @@ export class Database {
           type,
           sourceIdx: this.nodes.length - 2,
           targetIdx: this.nodes.length - 1,
-          properties: {},
+          properties: match[2] ? this.parseProperties(match[2]) : {},
         });
       }
     }
@@ -614,8 +667,8 @@ export class Database {
     const labelFilter = labelMatch ? labelMatch[1] : null;
 
     const matchingNodes = labelFilter
-      ? this.nodes.filter((n) => n.labels.includes(labelFilter))
-      : this.nodes;
+      ? this.liveNodes.filter((n) => n.labels.includes(labelFilter))
+      : this.liveNodes;
 
     return matchingNodes.map((node) => {
       const row: Record<string, unknown> = {};

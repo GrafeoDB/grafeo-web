@@ -2,6 +2,60 @@
 
 All notable changes to `@grafeo-db/web`.
 
+## [0.6.1] - 2026-11-02
+
+Catches up on Grafeo Core 0.6.1. Databases persisted by 0.6.0 load unchanged. New `detachDeleteNode()`, a `schema()` that describes the data's shape, and a faster engine in a slightly larger download. Some queries now fail where 0.6.0 answered with a wrong value: see Changed.
+
+### Added
+
+- **`detachDeleteNode(id)`**: deletes a node with all its edges in one call and returns `false` if the node does not exist. Runs in the open transaction when there is one, so it can be rolled back. In every build, lite included. Via Core 0.6.1.
+- **`schema()` describes the data's shape**: each label and edge type lists its `properties` with the types of their values (`{ name: 'age', types: ['INT64'] }`), and each edge type its `endpoints` (`{ source: 'Person', target: 'City', count: 3 }`). It lists only what is in use, sorted by name, and reads the whole graph. Via Core 0.6.1.
+- **Typed array parameters are vectors**: a `Float32Array` or a `Float64Array` in `params` is a `VECTOR` (of 32-bit floats, as vectors are stored) and comes back as a `Float32Array`. Via Core 0.6.1.
+- **More errors carry a `gqlStatus`**: a transaction already active (`25G01`), none active (`25000`), and a signed snapshot that does not verify (`22000`). Also in worker mode. Via Core 0.6.1.
+- New types: `SchemaEndpoint`, `SchemaProperty`.
+
+### Changed
+
+- **`@grafeo-db/wasm`** and **`@grafeo-db/wasm-lite`**: updated to `0.6.1`, pinned to that exact version.
+- **Faster and larger WebAssembly**: queries run about 1.6 times and inserts about 4.8 times as fast as in 0.6.0, by Core's measurements. `@grafeo-db/wasm` grows from 4.7 to 5.1 MB (about 1.7 MB gzipped) and `@grafeo-db/wasm-lite` from 2.6 to 3.3 MB (about 1.1 MB gzipped). Via Core 0.6.1.
+- **Breaking: casts**: `CAST` of text that is no number fails with `22018`, to a `DECIMAL(p, s)` that is too small with `22003`, and a float outside the integer range, an infinity or NaN to an integer with `22003`; they gave null, the largest integer or 0. `toInteger` and `toFloat` of text that is no number still give null. Via Core 0.6.1.
+- **Breaking: GQL patterns**: a quantified pattern of more than one edge without an upper bound or over 16 repetitions fails, an unbounded walk around a cycle fails at the path budget instead of stopping at 100 hops, and `{3,1}`, `*3..1` or a quantifier both inside and after an edge's brackets is a syntax error. Via Core 0.6.1.
+- **Breaking: SPARQL**: an undeclared prefix other than `rdf`, `rdfs`, `xsd`, `owl` and `fn`, a variable or quoted triple in `INSERT DATA` or `DELETE DATA`, and `BIND` to a variable in scope are syntax errors; `INSERT DATA` refuses a literal subject or a predicate that is not an IRI. Via Core 0.6.1.
+- **Breaking: indexes**: `CREATE INDEX` with a name another index has fails (`IF NOT EXISTS` keeps the existing one), and `hybridSearch()` without an index it can read fails. Via Core 0.6.1.
+- **Breaking: transactions**: `SERIALIZABLE` is refused with `GRAFEO-Q004` (it ran as snapshot isolation), and `START TRANSACTION`, `COMMIT` and `ROLLBACK` inside `beginTransaction()` fail with `25000`. Via Core 0.6.1.
+- **Breaking: procedure calls** with an unknown map key or an extra positional argument fail, naming the parameters. Via Core 0.6.1.
+
+### Fixed
+
+- **A commit that fails ends the transaction**: `isTransactionActive()` is `false` after it. Via Core 0.6.1.
+- **A failed commit no longer leaves earlier writes unsaved**: `beginTransaction()` cancels a pending save, and only a successful commit scheduled a new one, so writes made just before the transaction stayed out of IndexedDB until the next write. In the full build, the lite build and the worker.
+- **A parameter nested over 128 levels deep is refused** before it can overflow the stack and trap the WASM module. Via Core 0.6.1.
+
+### Internal
+
+- Integration tests load a v5 snapshot exported by each of wasm 0.6.0 and wasm-lite 0.6.0, directly and from IndexedDB, and check `detachDeleteNode`, `schema()`, the GQLSTATUS of transaction errors and the new refusals on the real engine.
+
+### Compatibility
+
+- **Persisted databases carry over**: 0.6.1 still writes snapshot v5, and v4 and v5 snapshots of earlier releases load unchanged. As in 0.6.0, the lite build refuses a snapshot that holds RDF triples or text or vector indexes: it keeps it under `<key>__backup` and starts empty.
+- **Back to 0.6.0**: 0.6.0 reads the snapshots 0.6.1 writes, unless one holds a vector index created with a name (`CREATE VECTOR INDEX doc_emb ON :Doc(emb) ...`). It refuses that one, keeps it under `<key>__backup` and starts empty.
+
+### Engine highlights (via Grafeo Core 0.6.1)
+
+- **SPARQL 1.1**: a `FILTER` inside `OPTIONAL` reads the whole solution, a group that opens with `OPTIONAL` or `MINUS` starts from one empty solution, `FILTER EXISTS` and `NOT EXISTS` only filter, and `DELETE WHERE` deletes only what a match of its whole pattern holds. Lookups from bound terms use the indexes, and a query after a small write no longer reads the whole store
+- **GQL quantified patterns**: a `WHERE` inside holds for each step, a segment of several edges repeats within its bounds, `{,2}` starts at 0, and `(n:%)` matches only labeled nodes
+- **SQL/PGQ graph patterns are GQL's**: label expressions, an element's own `WHERE`, quantifiers, `ANY SHORTEST` and `ALL SHORTEST`, path modes and path variables inside `GRAPH_TABLE`
+- **A write above a join reads the data as the statement started**, so it no longer changes a row twice or matches what it just created
+- **No more aborts** on `PROFILE` of a count over a multi-hop pattern, a SPARQL syntax error that looped until memory ran out, thousands of conditions on a path or Gremlin branches, and a two-hop pattern through a node with over 65,536 paths
+- **Expressions and numbers**: aggregates inside other expressions, `LET` variables inside lists, maps and `CASE`, negative list slices, `toInteger(' 42 ')` is 42, `toInteger('4.2')` 4, Cypher `sum()` of no values is 0, and decimal `sum` and `avg` no longer depend on the order of the rows
+- **Ordering and grouping**: `GROUP BY` without `ORDER BY` gives its groups in first-row order on every run, and a TIMESTAMP and a ZONED DATETIME of one instant order and group together in GQL and SQL/PGQ
+- **Syntax**: GQL `//` comments, non-reserved words and double-quoted names as names, and doubled backticks in Cypher names
+- **Vector search**: the most similar rows above a threshold come first, a similarity filter gives the same rows with and without the index, and embeddings written as lists are indexed
+- **Indexes**: vector indexes keep their name, a text index drops as itself, a multi-property index drops whole, `CREATE VECTOR INDEX` takes `IF NOT EXISTS`, and `SHOW INDEXES` also lists the indexes made through the API
+- **Faster queries**: multi-hop patterns stream, Cypher patterns over several relationships are 2 to 4 times as fast, and degree counts read the adjacency
+- Known limit: SPARQL reads in a transaction are not yet snapshot isolated (planned for Core 0.6.2)
+- Not wired into `@grafeo-db/web` yet: graph handles and time travel. Not in the WASM binding: the CSV and RDF file loaders. The backup, restore, WAL and file changes do not apply in the browser.
+
 ## [0.6.0] - 2026-10-24
 
 Catches up on Grafeo Core 0.6.0. Databases persisted by 0.5.x load unchanged (details under Compatibility). Worker mode no longer hangs under Vite, and a new `@grafeo-db/web/worker-client` entry keeps the engine off the main thread. Some queries now return other results or fail where 0.5.44 answered: see Changed.

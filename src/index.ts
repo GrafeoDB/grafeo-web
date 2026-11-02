@@ -28,8 +28,10 @@ import type {
   RdfLiteral,
   RdfTriple,
   SchemaEdgeType,
+  SchemaEndpoint,
   SchemaInfo,
   SchemaLabel,
+  SchemaProperty,
   SearchResult,
   StorageStats,
   TextIndexOptions,
@@ -67,8 +69,10 @@ export type {
   RdfLiteral,
   RdfTriple,
   SchemaEdgeType,
+  SchemaEndpoint,
   SchemaInfo,
   SchemaLabel,
+  SchemaProperty,
   SearchResult,
   StorageStats,
   TextIndexOptions,
@@ -283,7 +287,30 @@ export class GrafeoDB {
     return this.wasm!.getNodeEdges(id, options);
   }
 
-  /** Returns schema information (labels, edge types, property keys). */
+  /**
+   * Deletes a node and all its edges in one call. Runs in the open transaction
+   * when there is one, so it can be rolled back.
+   *
+   * @returns `false` if the node does not exist.
+   * @throws If `id` is not a nonnegative safe integer.
+   */
+  async detachDeleteNode(id: number): Promise<boolean> {
+    this.assertOpen();
+    if (this.proxy) {
+      return this.proxy.detachDeleteNode(id);
+    }
+    const deleted = this.wasm!.detachDeleteNode(id);
+    if (this.persistence && !this.wasm!.isTransactionActive()) {
+      this.persistence.scheduleSave(() => this.wasm!.exportSnapshot());
+    }
+    return deleted;
+  }
+
+  /**
+   * Returns schema information: the labels, edge types and property keys in
+   * use, sorted by name, with each label's and edge type's properties and
+   * value types and the labels each edge type connects. Reads the whole graph.
+   */
   async schema(): Promise<SchemaInfo> {
     this.assertOpen();
     if (this.proxy) {
@@ -843,9 +870,14 @@ export class GrafeoDB {
     if (this.proxy) {
       return this.proxy.commitTransaction();
     }
-    this.wasm!.commitTransaction();
-    if (this.persistence) {
-      this.persistence.scheduleSave(() => this.wasm!.exportSnapshot());
+    try {
+      this.wasm!.commitTransaction();
+    } finally {
+      // A commit that fails ends the transaction too, and beginTransaction()
+      // cancelled any pending save of the writes before it.
+      if (this.persistence && !this.wasm!.isTransactionActive()) {
+        this.persistence.scheduleSave(() => this.wasm!.exportSnapshot());
+      }
     }
   }
 

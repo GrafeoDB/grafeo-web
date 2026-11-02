@@ -126,6 +126,7 @@ describe('@grafeo-db/web/worker-client', () => {
     ['importLpg', [{ nodes: [{ labels: ['Person'] }], edges: [] }]],
     ['importRdf', [{ triples: [{ subject: 'http://a', predicate: 'http://p', object: 'http://b' }] }]],
     ['getNodeEdges', [0, { direction: 'in', edgeTypes: ['KNOWS'] }]],
+    ['detachDeleteNode', [3]],
     ['batchVectorSearch', ['Doc', 'emb', [vector, [0, 1]], 3, { ef: 50 }]],
     ['batchCreateNodesWithProps', [['Person'], [{ name: 'Alix' }]]],
     ['batchCreateEdges', [[{ src: 0, dst: 1, type: 'KNOWS' }]]],

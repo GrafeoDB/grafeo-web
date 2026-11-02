@@ -51,7 +51,24 @@ describe('worker entry on the real engine', () => {
     expect(answers.map((a) => a.id)).toEqual(ids);
     expect(answers.map((a) => a.error)).toEqual([undefined, undefined, undefined, undefined]);
     expect(answers[2].result).toEqual([{ 'a.name': 'Alix', 'b.name': 'Gus' }]);
-    expect(answers[3].result).toMatch(/^0\.6\.0($|-)/);
+    expect(answers[3].result).toMatch(/^0\.6\.1($|-)/);
+    expect((await call('close')).error).toBeUndefined();
+  });
+
+  it('detachDeleteNode, the richer schema and a vector parameter reach the engine', async () => {
+    expect((await call('init')).result).toBe(true);
+    await call('execute', "INSERT (:Person {name: 'Alix'})-[:KNOWS]->(:Person {name: 'Gus'})");
+    const schema = (await call('schema')).result as { edge_types: unknown };
+    expect(schema.edge_types).toEqual([
+      { name: 'KNOWS', count: 1, properties: [], endpoints: [{ source: 'Person', target: 'Person', count: 1 }] },
+    ]);
+    expect((await call('detachDeleteNode', 0)).result).toBe(true);
+    expect((await call('nodeCount')).result).toBe(1);
+    expect((await call('edgeCount')).result).toBe(0);
+    expect((await call('detachDeleteNode', 0)).result).toBe(false);
+    const [row] = (await call('execute', 'RETURN $v AS v', { params: { v: new Float64Array([0.5, 2]) } }))
+      .result as { v: unknown }[];
+    expect(row.v).toBeInstanceOf(Float32Array);
     expect((await call('close')).error).toBeUndefined();
   });
 

@@ -33,7 +33,7 @@ describe('Real WASM: Database basics', () => {
   it('creates a database and returns version', () => {
     const version = Database.version();
     expect(version).toMatch(/^\d+\.\d+\.\d+/);
-    expect(version).toMatch(/^0\.6\.0($|-)/);
+    expect(version).toMatch(/^0\.6\.1($|-)/);
     expect(LiteDatabase.version()).toBe(version);
   });
 
@@ -177,10 +177,55 @@ describe('Real WASM: Database basics', () => {
     db.free();
   });
 
-  it('schema lists edge types with their counts', () => {
+  it('schema lists labels and edge types with their properties and endpoints, sorted by name', () => {
     const db = new Database();
-    db.execute("INSERT (:Person {name: 'Alix'})-[:KNOWS]->(:Person {name: 'Gus'})");
-    expect((db.schema() as { edge_types: unknown }).edge_types).toEqual([{ name: 'KNOWS', count: 1 }]);
+    db.execute(
+      "INSERT (:Person {name: 'Alix', age: 30})-[:KNOWS {since: 2020}]->(:Person {name: 'Gus'})-[:LIVES_IN]->(:City {name: 'Utrecht', price: 2.50})",
+    );
+    expect(db.schema()).toEqual({
+      mode: 'lpg',
+      labels: [
+        {
+          name: 'City',
+          count: 1,
+          properties: [
+            { name: 'name', types: ['STRING'] },
+            { name: 'price', types: ['DECIMAL'] },
+          ],
+        },
+        {
+          name: 'Person',
+          count: 2,
+          properties: [
+            { name: 'age', types: ['INT64'] },
+            { name: 'name', types: ['STRING'] },
+          ],
+        },
+      ],
+      edge_types: [
+        {
+          name: 'KNOWS',
+          count: 1,
+          properties: [{ name: 'since', types: ['INT64'] }],
+          endpoints: [{ source: 'Person', target: 'Person', count: 1 }],
+        },
+        {
+          name: 'LIVES_IN',
+          count: 1,
+          properties: [],
+          endpoints: [{ source: 'Person', target: 'City', count: 1 }],
+        },
+      ],
+      property_keys: ['age', 'name', 'price', 'since'],
+    });
+    db.free();
+  });
+
+  it('schema lists only what is in use', () => {
+    const db = new Database();
+    db.execute("INSERT (:Person {name: 'Alix'})");
+    db.detachDeleteNode(0);
+    expect(db.schema()).toEqual({ mode: 'lpg', labels: [], edge_types: [], property_keys: [] });
     db.free();
   });
 });
@@ -226,6 +271,12 @@ describe('Real WASM: Snapshot export/import', () => {
 //   db.createVectorIndex('Doc', 'emb', { dimensions: 3, metric: 'cosine' })
 // snapshot-v4-wasm-lite-0.5.44.bin by @grafeo-db/wasm-lite 0.5.44 after the
 // first three statements (the lite build has no SPARQL).
+// snapshot-v5-wasm-0.6.0.bin by @grafeo-db/wasm 0.6.0 after the first two of
+// these (City also has price: 2.50), the same index, the SPARQL insert, and:
+//   db.createTextIndex('Doc', 'body', { tokenizer: 'standard', k1: 1.5 })
+//   db.createVectorIndex('Doc', 'emb', { dimensions: 3, metric: 'cosine' })
+// snapshot-v5-wasm-lite-0.6.0.bin by @grafeo-db/wasm-lite 0.6.0 after the same
+// first three statements.
 // IndexedDB keeps such snapshots across upgrades, so a release must still load
 // them, or ship a deliberate migration and update these tests.
 // 0.6: SPARQL bindings are RDF/JS terms, not strings.
@@ -268,6 +319,43 @@ describe('Real WASM: snapshots persisted by earlier releases', () => {
       { s: iri('http://ex/a'), o: iri('http://ex/b') },
     ]);
 
+    db.free();
+  });
+
+  it('imports a v5 snapshot exported by wasm 0.6.0, with its indexes and their names', async () => {
+    const data = await fixture('snapshot-v5-wasm-0.6.0.bin');
+    expect(data[0]).toBe(5);
+    const db = Database.importSnapshot(data);
+
+    expect(db.nodeCount()).toBe(5);
+    expect(db.edgeCount()).toBe(1);
+    expect(db.execute('SHOW INDEXES')).toEqual([
+      { name: 'person_name', type: 'Hash', label: 'Person', property: 'name' },
+      { name: null, type: 'FullText', label: 'Doc', property: 'body' },
+      { name: null, type: 'Vector', label: 'Doc', property: 'emb' },
+    ]);
+    expect(db.execute('MATCH (c:City) RETURN c.tags, c.score, c.ok, c.price')).toEqual([
+      { 'c.tags': ['a', 'b'], 'c.score': 1.5, 'c.ok': true, 'c.price': { $decimal: '2.50' } },
+    ]);
+    expect(db.textSearch('Doc', 'body', 'graph', 2).map((r: { id: number }) => r.id)).toEqual([3]);
+    expect(db.vectorSearch('Doc', 'emb', new Float32Array([1, 0, 0]), 1, {})).toEqual([
+      { id: 3, distance: expect.any(Number) },
+    ]);
+    expect(db.executeWithLanguage('SELECT ?s ?o WHERE { ?s <http://ex/knows> ?o }', 'sparql')).toEqual([
+      { s: iri('http://ex/a'), o: iri('http://ex/b') },
+    ]);
+    db.free();
+  });
+
+  it('wasm-lite imports a v5 snapshot exported by wasm-lite 0.6.0', async () => {
+    const data = await fixture('snapshot-v5-wasm-lite-0.6.0.bin');
+    expect(data[0]).toBe(5);
+    const db = LiteDatabase.importSnapshot(data);
+    expect(db.nodeCount()).toBe(3);
+    expect(db.edgeCount()).toBe(1);
+    expect(db.execute('SHOW INDEXES')).toEqual([
+      { name: 'person_name', type: 'Hash', label: 'Person', property: 'name' },
+    ]);
     db.free();
   });
 
@@ -437,6 +525,135 @@ describe('Real WASM: Bulk import', () => {
     expect(db.nodeCount()).toBe(0);
 
     db.free();
+  });
+});
+
+describe('Real WASM: 0.6.1 behaviour', () => {
+  const failure = (run: () => unknown) => {
+    try {
+      run();
+    } catch (error) {
+      return error as Error & { gqlStatus?: string };
+    }
+    throw new Error('it did not fail');
+  };
+
+  it.each([
+    ['wasm', () => new Database()],
+    ['wasm-lite', () => new LiteDatabase()],
+  ])('%s: detachDeleteNode deletes a node with its edges, and in a transaction can be rolled back', (_name, make) => {
+    const db = make();
+    db.execute("INSERT (:Person {name: 'Alix'})-[:KNOWS]->(:Person {name: 'Gus'})");
+    db.beginTransaction();
+    expect(db.detachDeleteNode(0)).toBe(true);
+    // A query reads through the transaction; nodeCount() reads what is committed.
+    expect(db.execute('MATCH (p:Person) RETURN p.name')).toEqual([{ 'p.name': 'Gus' }]);
+    db.rollbackTransaction();
+    expect([db.nodeCount(), db.edgeCount()]).toEqual([2, 1]);
+    db.beginTransaction();
+    expect(db.detachDeleteNode(0)).toBe(true);
+    db.commitTransaction();
+    expect([db.nodeCount(), db.edgeCount()]).toEqual([1, 0]);
+    expect(db.detachDeleteNode(0)).toBe(false);
+    expect(() => db.detachDeleteNode(-1)).toThrow('-1 is not a node ID');
+    expect(() => db.detachDeleteNode(1.5)).toThrow('1.5 is not a node ID');
+    db.free();
+  });
+
+  it('transaction state errors carry a GQLSTATUS, and a statement cannot end a transaction', () => {
+    const db = new Database();
+    expect(failure(() => db.commitTransaction())).toMatchObject({
+      message: 'No active transaction to commit.',
+      gqlStatus: '25000',
+    });
+    expect(failure(() => db.rollbackTransaction())).toMatchObject({ gqlStatus: '25000' });
+    db.beginTransaction();
+    expect(failure(() => db.beginTransaction())).toMatchObject({ gqlStatus: '25G01' });
+    for (const statement of ['COMMIT', 'ROLLBACK', 'START TRANSACTION']) {
+      expect(failure(() => db.execute(statement))).toMatchObject({ gqlStatus: '25000' });
+    }
+    expect(db.isTransactionActive()).toBe(true);
+    db.rollbackTransaction();
+    db.free();
+  });
+
+  it('a signed snapshot that does not verify fails with 22000', () => {
+    const db = new Database();
+    const key = new Uint8Array(32).fill(7);
+    const signed = db.exportSnapshotSigned(key);
+    expect(failure(() => Database.importSnapshotSigned(signed, new Uint8Array(32).fill(8)))).toMatchObject({
+      gqlStatus: '22000',
+    });
+    db.free();
+  });
+
+  it('SERIALIZABLE is refused instead of running as snapshot isolation', () => {
+    const db = new Database();
+    expect(failure(() => db.execute('START TRANSACTION ISOLATION LEVEL SERIALIZABLE'))).toMatchObject({
+      message: expect.stringMatching(/^GRAFEO-Q004: /),
+      gqlStatus: '42000',
+    });
+    db.free();
+  });
+
+  it('a Float32Array or Float64Array parameter is a vector', () => {
+    const db = new Database();
+    for (const array of [new Float32Array([0.5, 2]), new Float64Array([0.5, 2])]) {
+      const [row] = db.executeWithParams('RETURN $v AS v, size($v) AS n', { v: array });
+      expect(row.v).toBeInstanceOf(Float32Array);
+      expect(Array.from(row.v as Float32Array)).toEqual([0.5, 2]);
+      expect(row.n).toBe(2);
+    }
+    db.free();
+  });
+
+  it('a parameter nested too deep is refused and the module lives on', () => {
+    const db = new Database();
+    let deep: unknown = 1;
+    for (let depth = 0; depth < 200_000; depth++) deep = [deep];
+    expect(() => db.executeWithParams('RETURN $v AS v', { v: deep })).toThrow(/more than 128 levels deep/);
+    expect(db.execute('RETURN 1 AS one')).toEqual([{ one: 1 }]);
+    db.free();
+  });
+
+  it('a CAST that cannot hold fails; toInteger of text that is no number stays null', () => {
+    const db = new Database();
+    expect(failure(() => db.execute("RETURN CAST('abc' AS INTEGER) AS v"))).toMatchObject({ gqlStatus: '22018' });
+    expect(failure(() => db.execute('RETURN CAST(1e300 AS INTEGER) AS v'))).toMatchObject({ gqlStatus: '22003' });
+    expect(db.execute("RETURN toInteger('abc') AS a, toInteger(' 42 ') AS b, toInteger('4.2') AS c")).toEqual([
+      { a: null, b: 42, c: 4 },
+    ]);
+    db.free();
+  });
+
+  it('a quantifier whose upper bound is below its lower bound is a syntax error in GQL', () => {
+    const db = new Database();
+    expect(failure(() => db.execute('MATCH (a)-[e]->{3,1}(b) RETURN a'))).toMatchObject({ gqlStatus: '42001' });
+    db.free();
+  });
+
+  it('SPARQL refuses undeclared prefixes and variables in INSERT DATA, and predefines rdf:', () => {
+    const db = new Database();
+    const sparql = (query: string) => db.executeWithLanguage(query, 'sparql');
+    expect(failure(() => sparql('SELECT ?s WHERE { ?s foo:bar ?o }'))).toMatchObject({ gqlStatus: '42001' });
+    expect(failure(() => sparql('INSERT DATA { ?s <http://ex/k> <http://ex/b> }'))).toMatchObject({
+      gqlStatus: '42001',
+    });
+    expect(sparql('SELECT ?s WHERE { ?s rdf:type ?o }')).toEqual([]);
+    db.free();
+  });
+
+  it('a name stands for one index, a vector index keeps its name through a snapshot', () => {
+    const db = new Database();
+    db.execute('CREATE INDEX shared FOR (p:Person) ON (p.a)');
+    expect(() => db.execute('CREATE INDEX shared FOR (q:Place) ON (q.b)')).toThrow("Index 'shared' already exists");
+    db.execute("CREATE VECTOR INDEX doc_emb ON :Doc(emb) DIMENSION 3 METRIC 'cosine'");
+    const again = Database.importSnapshot(db.exportSnapshot());
+    expect(again.execute('SHOW INDEXES')).toEqual(
+      expect.arrayContaining([{ name: 'doc_emb', type: 'Vector', label: 'Doc', property: 'emb' }]),
+    );
+    db.free();
+    again.free();
   });
 });
 

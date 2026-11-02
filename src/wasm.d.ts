@@ -2,7 +2,7 @@
  * Type declarations for @grafeo-db/wasm and @grafeo-db/wasm-lite.
  *
  * These mirror the wasm-bindgen generated types of the WASM crate
- * (0.6.0), with the result shapes the generated `any` leaves out.
+ * (0.6.1), with the result shapes the generated `any` leaves out.
  * The lite variant leaves out the other query languages and the AI search
  * features at the WASM level.
  */
@@ -188,6 +188,8 @@ declare module '@grafeo-db/wasm' {
 
     /** The edges of a node as `[neighborId, edgeId]` pairs (0.6). */
     getNodeEdges(id: number, options?: object): [number, number][];
+    /** Deletes a node with its edges, in the open transaction if any; false if it does not exist. */
+    detachDeleteNode(id: number): boolean;
 
     /**
      * Creates one node per row in one transaction and returns their IDs (0.6).
@@ -376,6 +378,8 @@ declare module '@grafeo-db/wasm-lite' {
     nodeCount(): number;
     edgeCount(): number;
     getNodeEdges(id: number, options?: object): [number, number][];
+    /** Deletes a node with its edges, in the open transaction if any; false if it does not exist. */
+    detachDeleteNode(id: number): boolean;
     schema(): unknown;
     setSchema(name: string): void;
     resetSchema(): void;

@@ -111,7 +111,7 @@ describe('API parity', () => {
       const labelNames2 = schema2.labels.map((l) => l.name);
       expect(labelNames2).toContain('Person');
       expect(labelNames2).toContain('Company');
-      expect(schema2.edge_types).toContainEqual({ name: 'EMPLOYS', count: 1 });
+      expect(schema2.edge_types).toContainEqual(expect.objectContaining({ name: 'EMPLOYS', count: 1 }));
     });
 
     it('schema starts empty for a fresh database', async () => {
@@ -145,6 +145,7 @@ describe('API parity', () => {
         'clearPlanCache',
         'info',
         'getNodeEdges',
+        'detachDeleteNode',
       ];
 
       for (const method of expectedMethods) {

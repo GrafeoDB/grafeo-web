@@ -153,6 +153,10 @@ export class WorkerProxy {
     return (await this.send('getNodeEdges', [id, options])) as NodeEdge[];
   }
 
+  async detachDeleteNode(id: number): Promise<boolean> {
+    return (await this.send('detachDeleteNode', [id])) as boolean;
+  }
+
   async schema(): Promise<SchemaInfo> {
     return (await this.send('schema')) as SchemaInfo;
   }
