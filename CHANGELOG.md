@@ -2,41 +2,123 @@
 
 All notable changes to `@grafeo-db/web`.
 
+## [0.6.2] - 2026-11-08
+
+Catches up on Grafeo Core 0.6.2. Databases persisted by 0.6.1 load unchanged. A correctness release: a string never equals a number, a null in a pattern finds nothing, an operand of the wrong kind raises `22G12` where 0.6.1 answered null, `importRdf()` now works in the full build, and the engine is a little larger. Some queries now fail or answer differently where 0.6.1 was wrong: see Changed.
+
+### Changed
+
+Queries and calls that ran in 0.6.1 and now fail or answer differently, all from Grafeo Core 0.6.2.
+
+- **A string and a number are never equal**: `'5' = 5` is false and `'5' <> 5` true, in GQL and Cypher, also in indexes, joins, `IN`, `MERGE` and upserts; `id(n) = '5'` finds nothing.
+- **Lists and records holding a null** can compare as unknown: `[null] = [null]` drops the row in a `WHERE`, and a value holding a null matches nothing in a join or a lookup. `DISTINCT`, grouping and `UNIQUE` still treat nulls as one value.
+- **Comparing two kinds with `<`, `<=`, `>`, `>=`**: GQL orders them as `ORDER BY` does (a string before every number), Cypher and Gremlin answer null, SQL/PGQ raises `22G04`.
+- **Wrong-kind operands raise `22G12`**: `true + 1`, `-'a'`, `[1, 2, 3][1.5]`, and in GQL `'x' + 3` in either order (it gave `'x3'`). A null operand still gives null.
+- **`CREATE INDEX` holds its label only**: a query on another label scans, with the same rows and a note in `EXPLAIN`. Existing indexes stay as they are, and `createPropertyIndex()` still covers every label.
+- **Transactions**: `START TRANSACTION`, `COMMIT` and `ROLLBACK` through `execute()` are refused — start one with `beginTransaction()` and end it with `commitTransaction()` or `rollbackTransaction()`; `CREATE GRAPH ... AS COPY OF` is refused in a transaction.
+- **Procedure arguments** outside what an argument allows, or missing, raise `22023` naming the argument; procedures stop at the query timeout instead of answering partially.
+- **Edge weights**: the weighted algorithms refuse a value they cannot use, naming the edge and property (`22G12`, or `22023` for NaN, an infinity or a negative weight).
+- **`max_flow` and `min_cost_max_flow`** return one row per edge that carries flow, **`topological_sort`** on a cycle raises `22000` naming a cycle, and equal-weight spanning trees come back with the lowest edge ids.
+- **`INSERT` and single-node `MERGE` labels** containing `|`, `!`, `%` or parentheses are an error naming the statement.
+- **A negative `SKIP` or `LIMIT` after a GQL `CALL`** raises `22G02`.
+- **The memory limit is enforced**: WASM keeps the 768 MiB default, and a write that grows the store past it is refused with `GRAFEO-S001`, changes nothing, and the database and an open transaction stay usable.
+- **`DATETIME '...'` with an offset** is a ZONED DATETIME at that offset (`Z` is `+00:00`); 0.6.1 gave the UTC time without it.
+
+### Performance
+
+From Grafeo Core 0.6.2, by its measurements.
+
+- **Planner**: comma patterns pick their join order from sampled degrees, cycles close by lookup or intersection, and an equality on a property without an index reads its column directly.
+- **Constraints**: `UNIQUE` and `NODE KEY` build an index on their first property, so an insert under one no longer reads the whole label.
+- **Weighted algorithms** read each edge's weight directly instead of loading the whole edge; Dijkstra takes about a third fewer instructions.
+
+### WASM: larger
+
+From Grafeo Core 0.6.2, by its measurements.
+
+- `@grafeo-db/wasm` grows from 5.1 to 5.8 MB (about 2.0 MB gzipped) and `@grafeo-db/wasm-lite` from 3.3 to 3.9 MB (about 1.4 MB gzipped), mostly `importRdf` now in the full build.
+
+### Added
+
+From Grafeo Core 0.6.2.
+
+- **Query warnings on the raw result**: `executeRaw()` and the other raw calls return `warnings`, each a `QueryWarning` (`{ code, kind, message }`, `kind` a `deprecation` or a `notice`), ordered by code, empty when none. `execute()` returns rows only, so its warnings are not reported. Experimental: new warnings and kinds may come.
+- **Graph procedures**: `CALL grafeo.ktruss()`, `grafeo.total_triangles()` and `grafeo.subgraph_isomorphism(pattern_edges, pattern_nodes)` (full build).
+- **SQL/PGQ `||`** concatenates strings and lists.
+- **Lite runs the catalog procedures**: `CALL grafeo.labels()`, `grafeo.procedures()` and the like answer in `@grafeo-db/wasm-lite`; the CSV load procedures are refused there.
+- **`grafeo.pagerank` warns** (`01Y01`) when it runs out of iterations before its scores settle.
+- New type: `QueryWarning`.
+
+### Deprecated
+
+From Grafeo Core 0.6.2. They warn, and 0.7.0 refuses them.
+
+- **`ZONED DATETIME '...'` and `ZONED TIME '...'` literals** (`01X01`, `01X03`): write `DATETIME '...'` or `TIME '...'` with an offset.
+- **`+` on two lists** in GQL and SQL/PGQ (`01X02`): use `||`.
+
+### Fixed
+
+From Grafeo Core 0.6.2.
+
+- **`importRdf()` works in the full build**: the WASM `importRdf` is in every build with the RDF store, `@grafeo-db/wasm` included; the lite build still refuses it.
+- **Label expressions on a path's first node and in writes**: `MATCH (x IS A)-[:R]->(t)` now checks them, and `INSERT (n IS Person)` and `MERGE (n IS Person)` set those labels. Databases written by 0.6.1 may hold unlabelled nodes from such writes: find them with `MATCH (n) WHERE size(labels(n)) = 0 RETURN n`.
+- **A null in a property map** (`MATCH (n {k: NULL})`, also on an edge, in GQL, Cypher and SQL/PGQ) finds nothing; it found the elements without the key. A null in a `MERGE` pattern still matches an absent property.
+- **SPARQL**: a `.` after `FILTER`, `OPTIONAL`, `MINUS`, `GRAPH` or a nested group parses again (#737); a sub-select inside `GRAPH ?g` binds `?g` (#739); `BIND(EXISTS {...} AS ?v)` evaluates (#740); inside `GRAPH ?g { ... }`, `?g` binds only after the group (#738); and a variable repeated in one triple pattern holds the same term in each position.
+- **`UNIQUE`, `NODE KEY` and `MERGE`** treat `1`, `1.0e0` and the decimal `1.0`, and `[1]` and `[1.0]`, as one value; `UNIQUE` refuses `0.0` and `-0.0` as duplicates and counts every NaN, of either sign, as one.
+- **Filtered vector search on a quantized index** no longer returns fewer than `k` rows when the allowed nodes lie far from the query.
+- **Schema statements roll back with their transaction.**
+- **Booleans order false below true** in every plan, **lists compare element by element**, Cypher `+` joins a number and a string, grouping by a parameter works, `SKIP` and `LIMIT` after a GQL `CALL` take effect, and `YIELD` of a column the procedure does not have is refused when the call is planned.
+- **A graph cleared and written back keeps its size**, in a session and across reopens.
+
+### Upgrading
+
+- **The engine**: `@grafeo-db/wasm` and `@grafeo-db/wasm-lite` `0.6.2`, pinned to that exact version.
+- **Persisted databases carry over**: 0.6.2 still writes snapshot v5, and v4 and v5 snapshots of earlier releases load unchanged. As in 0.6.1, the lite build refuses a snapshot that holds RDF triples or text or vector indexes: it keeps it under `<key>__backup` and starts empty.
+- **Back to 0.6.1**: 0.6.1 opens the snapshots 0.6.2 writes with the same rows, but without the indexes a label-scoped `CREATE INDEX ... ON :Label(prop)` created. As in 0.6.1, 0.6.0 refuses a snapshot that holds a vector index created with a name (`CREATE VECTOR INDEX doc_emb ON :Doc(emb) ...`): it keeps it under `<key>__backup` and starts empty.
+
 ## [0.6.1] - 2026-11-02
 
 Catches up on Grafeo Core 0.6.1. Databases persisted by 0.6.0 load unchanged. New `detachDeleteNode()`, a `schema()` that describes the data's shape, and a faster engine in a slightly larger download. Some queries now fail where 0.6.0 answered with a wrong value: see Changed.
 
-### Added
-
-- **`detachDeleteNode(id)`**: deletes a node with all its edges in one call and returns `false` if the node does not exist. Runs in the open transaction when there is one, so it can be rolled back. In every build, lite included. Via Core 0.6.1.
-- **`schema()` describes the data's shape**: each label and edge type lists its `properties` with the types of their values (`{ name: 'age', types: ['INT64'] }`), and each edge type its `endpoints` (`{ source: 'Person', target: 'City', count: 3 }`). It lists only what is in use, sorted by name, and reads the whole graph. Via Core 0.6.1.
-- **Typed array parameters are vectors**: a `Float32Array` or a `Float64Array` in `params` is a `VECTOR` (of 32-bit floats, as vectors are stored) and comes back as a `Float32Array`. Via Core 0.6.1.
-- **More errors carry a `gqlStatus`**: a transaction already active (`25G01`), none active (`25000`), and a signed snapshot that does not verify (`22000`). Also in worker mode. Via Core 0.6.1.
-- New types: `SchemaEndpoint`, `SchemaProperty`.
-
 ### Changed
 
-- **`@grafeo-db/wasm`** and **`@grafeo-db/wasm-lite`**: updated to `0.6.1`, pinned to that exact version.
-- **Faster and larger WebAssembly**: queries run about 1.6 times and inserts about 4.8 times as fast as in 0.6.0, by Core's measurements. `@grafeo-db/wasm` grows from 4.7 to 5.1 MB (about 1.7 MB gzipped) and `@grafeo-db/wasm-lite` from 2.6 to 3.3 MB (about 1.1 MB gzipped). Via Core 0.6.1.
-- **Breaking: casts**: `CAST` of text that is no number fails with `22018`, to a `DECIMAL(p, s)` that is too small with `22003`, and a float outside the integer range, an infinity or NaN to an integer with `22003`; they gave null, the largest integer or 0. `toInteger` and `toFloat` of text that is no number still give null. Via Core 0.6.1.
-- **Breaking: GQL patterns**: a quantified pattern of more than one edge without an upper bound or over 16 repetitions fails, an unbounded walk around a cycle fails at the path budget instead of stopping at 100 hops, and `{3,1}`, `*3..1` or a quantifier both inside and after an edge's brackets is a syntax error. Via Core 0.6.1.
-- **Breaking: SPARQL**: an undeclared prefix other than `rdf`, `rdfs`, `xsd`, `owl` and `fn`, a variable or quoted triple in `INSERT DATA` or `DELETE DATA`, and `BIND` to a variable in scope are syntax errors; `INSERT DATA` refuses a literal subject or a predicate that is not an IRI. Via Core 0.6.1.
-- **Breaking: indexes**: `CREATE INDEX` with a name another index has fails (`IF NOT EXISTS` keeps the existing one), and `hybridSearch()` without an index it can read fails. Via Core 0.6.1.
-- **Breaking: transactions**: `SERIALIZABLE` is refused with `GRAFEO-Q004` (it ran as snapshot isolation), and `START TRANSACTION`, `COMMIT` and `ROLLBACK` inside `beginTransaction()` fail with `25000`. Via Core 0.6.1.
-- **Breaking: procedure calls** with an unknown map key or an extra positional argument fail, naming the parameters. Via Core 0.6.1.
+Queries and calls that ran in 0.6.0 and now fail, all from Grafeo Core 0.6.1.
+
+- **Casts**: `CAST` of text that is no number fails with `22018`, to a `DECIMAL(p, s)` that is too small with `22003`, and a float outside the integer range, an infinity or NaN to an integer with `22003`; they gave null, the largest integer or 0. `toInteger` and `toFloat` of text that is no number still give null.
+- **GQL patterns**: a quantified pattern of more than one edge without an upper bound or over 16 repetitions fails, an unbounded walk around a cycle fails at the path budget instead of stopping at 100 hops, and `{3,1}`, `*3..1` or a quantifier both inside and after an edge's brackets is a syntax error.
+- **SPARQL**: an undeclared prefix other than `rdf`, `rdfs`, `xsd`, `owl` and `fn`, a variable or quoted triple in `INSERT DATA` or `DELETE DATA`, and `BIND` to a variable in scope are syntax errors; `INSERT DATA` refuses a literal subject or a predicate that is not an IRI.
+- **Indexes**: `CREATE INDEX` with a name another index has fails (`IF NOT EXISTS` keeps the existing one), and `hybridSearch()` without an index it can read fails.
+- **Transactions**: `SERIALIZABLE` is refused with `GRAFEO-Q004` (it ran as snapshot isolation), and `START TRANSACTION`, `COMMIT` and `ROLLBACK` inside `beginTransaction()` fail with `25000`.
+- **Procedure calls** with an unknown map key or an extra positional argument fail, naming the parameters.
+
+### WASM: faster (and larger)
+
+From Grafeo Core 0.6.1, by its measurements.
+
+- **Built for speed**: queries run about 1.6 times and inserts about 4.8 times as fast as in 0.6.0.
+- **A larger download**: `@grafeo-db/wasm` grows from 4.7 to 5.1 MB (about 1.7 MB gzipped) and `@grafeo-db/wasm-lite` from 2.6 to 3.3 MB (about 1.1 MB gzipped).
+
+### Added
+
+From Grafeo Core 0.6.1.
+
+- **`detachDeleteNode(id)`**: deletes a node with all its edges in one call and returns `false` if the node does not exist. Runs in the open transaction when there is one, so it can be rolled back. In every build, lite included.
+- **`schema()` describes the data's shape**: each label and edge type lists its `properties` with the types of their values (`{ name: 'age', types: ['INT64'] }`), and each edge type its `endpoints` (`{ source: 'Person', target: 'City', count: 3 }`). It lists only what is in use, sorted by name, and reads the whole graph.
+- **Typed array parameters are vectors**: a `Float32Array` or a `Float64Array` in `params` is a `VECTOR` (of 32-bit floats, as vectors are stored) and comes back as a `Float32Array`.
+- **More errors carry a `gqlStatus`**: a transaction already active (`25G01`), none active (`25000`), and a signed snapshot that does not verify (`22000`). Also in worker mode.
+- New types: `SchemaEndpoint`, `SchemaProperty`.
 
 ### Fixed
 
-- **A commit that fails ends the transaction**: `isTransactionActive()` is `false` after it. Via Core 0.6.1.
-- **A failed commit no longer leaves earlier writes unsaved**: `beginTransaction()` cancels a pending save, and only a successful commit scheduled a new one, so writes made just before the transaction stayed out of IndexedDB until the next write. In the full build, the lite build and the worker.
-- **A parameter nested over 128 levels deep is refused** before it can overflow the stack and trap the WASM module. Via Core 0.6.1.
+From Grafeo Core 0.6.1, except the one marked as a wrapper fix.
 
-### Internal
+- **A commit that fails ends the transaction**: `isTransactionActive()` is `false` after it.
+- **A failed commit no longer leaves earlier writes unsaved** (wrapper fix): `beginTransaction()` cancels a pending save, and only a successful commit scheduled a new one, so writes made just before the transaction stayed out of IndexedDB until the next write. In the full build, the lite build and the worker.
+- **A parameter nested over 128 levels deep is refused** before it can overflow the stack and trap the WASM module.
 
-- Integration tests load a v5 snapshot exported by each of wasm 0.6.0 and wasm-lite 0.6.0, directly and from IndexedDB, and check `detachDeleteNode`, `schema()`, the GQLSTATUS of transaction errors and the new refusals on the real engine.
+### Upgrading
 
-### Compatibility
-
+- **The engine**: `@grafeo-db/wasm` and `@grafeo-db/wasm-lite` `0.6.1`, pinned to that exact version.
 - **Persisted databases carry over**: 0.6.1 still writes snapshot v5, and v4 and v5 snapshots of earlier releases load unchanged. As in 0.6.0, the lite build refuses a snapshot that holds RDF triples or text or vector indexes: it keeps it under `<key>__backup` and starts empty.
 - **Back to 0.6.0**: 0.6.0 reads the snapshots 0.6.1 writes, unless one holds a vector index created with a name (`CREATE VECTOR INDEX doc_emb ON :Doc(emb) ...`). It refuses that one, keeps it under `<key>__backup` and starts empty.
 
@@ -58,62 +140,60 @@ Catches up on Grafeo Core 0.6.1. Databases persisted by 0.6.0 load unchanged. Ne
 
 ## [0.6.0] - 2026-10-24
 
-Catches up on Grafeo Core 0.6.0. Databases persisted by 0.5.x load unchanged (details under Compatibility). Worker mode no longer hangs under Vite, and a new `@grafeo-db/web/worker-client` entry keeps the engine off the main thread. Some queries now return other results or fail where 0.5.44 answered: see Changed.
-
-### Added
-
-- **`@grafeo-db/web/worker-client`**: `GrafeoDB` with the API of the main entry, always in a Web Worker, and without importing `@grafeo-db/wasm` on the main thread. The main entry imports the engine for direct mode, and the bundler-target package fetches and compiles it (about 4 MB) as soon as it is imported, also when `create({ worker: true })` then runs everything in a worker; with the worker client only the worker loads it. Pass `{ worker }` to use a Worker your bundler builds from `@grafeo-db/web/worker-src`.
-- **`executeRaw()` takes `params`**, in every language and in the lite build, through the new `executeRawWithParams` and `executeRawWithLanguageAndParams` of the engine (lists and maps included). Previously `params` was not accepted there.
-- **Text index options**: `createTextIndex(label, property, { k1, b, tokenizer, stopWords })`, with the tokenizers `simple` (default), `standard` (every word, for languages such as Russian or Greek) and `cjk_bigram` (Chinese, Japanese, Korean). The database keeps the options with the index. Via Core 0.6.0.
-- **Filters for text and hybrid search**: `textSearch(..., k, { filters })` and `hybridSearch(..., k, { filters })` take the property filters of `vectorSearch()` (`{ city: 'Berlin' }`, `{ rank: { $gt: 19 } }`) and search only the matching nodes, so up to `k` matching results come back. Via Core 0.6.0.
-- **`QueryLanguage` gains `'graphql-rdf'`** (GraphQL over the triple store) **and `'sql-pgq'`** (an alias of `'sql'`), both accepted by the engine; TypeScript users no longer need a cast.
-- **`getNodeEdges(id, { direction, edgeTypes })`**: the edges of a node as `[neighborId, edgeId]` pairs, without a query; `direction` is `'out'` (default), `'in'` or `'both'`. In every build, lite included. Via Core 0.6.0.
-- **Batch writes**: `batchCreateNodesWithProps(labels, rows)` and `batchCreateEdges([{ src, dst, type, properties }])` create many nodes or edges in one transaction and return their IDs; if one breaks a constraint or names a missing node, none is created. They commit on their own, so they throw while a transaction is open. Full build only. Via Core 0.6.0.
-- **Upserts**: `upsertNodes(labels, rows, { key, replace })` creates or updates nodes matched by a key property (default `id`), and `upsertEdges(edgeType, rows, { key, srcField, dstField, endpointKey, endpointLabels, replace })` does the same for edges between existing nodes; both return `{ created, updated, skipped, skippedRows }` and run in the open transaction when there is one. Full build only. Via Core 0.6.0.
-- **`batchVectorSearch(label, property, queries, k, { ef, filters })`**: several query vectors in one call, one result list per query. Via Core 0.6.0.
-- **`executeRaw()` reports more**: `counters` (nodes, edges, properties and labels written), `kind` (`'rows'`, `'boolean'` for SPARQL `ASK`, `'graph'` for `CONSTRUCT`) and, for a `PROFILE` statement, `profile` (the operator tree, experimental). Via Core 0.6.0.
-- **`compact()` in the lite build**, and `compact()` returns the engine's `CompactReport` (`{ checkpointed, versions_collected, rows_compressed, duration_ms }`).
-- **Worker errors keep their `name` and `gqlStatus`**: an error thrown in the worker reaches the main thread with its name and, when the engine sets it, its GQLSTATUS (`22012`, `22003`, `42001`, ...), not only its message.
-- New types: `BatchEdge`, `CompactReport`, `NodeEdge`, `NodeEdgesOptions`, `SchemaEdgeType`, `TextIndexOptions`, `TextSearchOptions`, `UpsertEdgesOptions`, `UpsertNodesOptions`, `UpsertSummary`, `WorkerClientOptions`, `WriteCounters`.
+Catches up on Grafeo Core 0.6.0. Databases persisted by 0.5.x load unchanged (details under Upgrading). Worker mode no longer hangs under Vite, and a new `@grafeo-db/web/worker-client` entry keeps the engine off the main thread. Some queries now return other results or fail where 0.5.44 answered: see Changed.
 
 ### Changed
 
-- **`@grafeo-db/wasm`** and **`@grafeo-db/wasm-lite`**: updated to `0.6.0`, pinned to that exact version. The Publish workflow refuses to publish a stable version on an engine pre-release.
+Queries and calls that ran in 0.5.44 and now fail or give other results, from Grafeo Core 0.6.0 unless an entry is marked as a wrapper change.
+
+- **SPARQL results hold RDF terms**: each IRI, blank node and literal comes back as an RDF/JS term, `{ termType: 'NamedNode', value: 'http://ex/a' }` or `{ termType: 'Literal', value: '30', language: '', datatype: { termType: 'NamedNode', value: 'http://www.w3.org/2001/XMLSchema#integer' } }`, where it was a plain string or number. Read `.value` for the old form. GraphQL over RDF still returns plain values.
+- **`importRows()` and `importLpg()` import all or nothing**: a row that breaks a constraint throws as before, but now nothing of the import is written; 0.5.44 kept the rows before the failing one.
+- **A lone `INSERT` returns no rows**: `execute("INSERT (:Person {name: 'Alix'})")` returns `[]`; 0.5.44 returned the created node (`[{ _anon_0: {...} }]`). Read created data with a `RETURN`.
+- **GQL sorts nulls last**, ascending and descending, unless the query says `NULLS FIRST`; `ORDER BY x DESC` put them first. Cypher keeps openCypher's order.
+- **A statement nests at most 64 levels deep** (parentheses, lists, maps, function calls, `CASE`, subqueries, operator chains) and its plan at most 128; a deeper statement fails with an error that names the limit. In 0.5.44 a very large statement could overflow the stack, after which every call into the WASM module failed, `new Database()` included. Long flat statements (an `OR` of 10,000 conditions, an `INSERT` of 10,000 patterns) now run.
+- **Property values nest at most 128 levels deep**: a deeper list, map or path written through a parameter or a bulk import fails and writes nothing.
+- **Exact decimals**: in GQL and SQL/PGQ a number with a point (`1.5`) is an exact decimal, so `0.1 + 0.2 = 0.3` holds; a decimal value comes back as `{ $decimal: '1.50' }` and is written the same way. A number with an exponent (`1.5e0`) stays a float, and so does Cypher's `1.5`. SPARQL follows the XPath type promotion: `5 / 2` is `2.5`.
+- **Integer and decimal overflow and division by zero fail the query** with GQLSTATUS `22003` or `22012` (code `GRAFEO-Q006`), where they returned null; a float division keeps its IEEE result (`toFloat(1) / 0` is infinity).
+- **Error messages start with their Grafeo code** (`GRAFEO-Q001: syntax error: ...`), and a mistake in the query is reported with the code of its kind, not `GRAFEO-X001`.
+- **SPARQL `ASK` returns one row**, `[{ boolean: true }]` or `[{ boolean: false }]`; it returned the first matching row, or none for false.
 - **`compact()` no longer builds a columnar store** (Core 0.6.0 dropped the separate compacted store): it drops the old row versions no open transaction can see, encodes the property columns in memory and returns a report. It no longer needs the `compact-store` feature.
-- **Breaking: SPARQL results hold RDF terms**: each IRI, blank node and literal comes back as an RDF/JS term, `{ termType: 'NamedNode', value: 'http://ex/a' }` or `{ termType: 'Literal', value: '30', language: '', datatype: { termType: 'NamedNode', value: 'http://www.w3.org/2001/XMLSchema#integer' } }`, where it was a plain string or number. Read `.value` for the old form. GraphQL over RDF still returns plain values. Via Core 0.6.0.
-- **Breaking: `importRows()` and `importLpg()` import all or nothing**: a row that breaks a constraint throws as before, but now nothing of the import is written; 0.5.44 kept the rows before the failing one. Via Core 0.6.0.
-- **Breaking: a lone `INSERT` returns no rows**: `execute("INSERT (:Person {name: 'Alix'})")` returns `[]`; 0.5.44 returned the created node (`[{ _anon_0: {...} }]`). Read created data with a `RETURN`. Via Core 0.6.0.
-- **Breaking: GQL sorts nulls last**, ascending and descending, unless the query says `NULLS FIRST`; `ORDER BY x DESC` put them first. Cypher keeps openCypher's order. Via Core 0.6.0.
-- **Breaking: a statement nests at most 64 levels deep** (parentheses, lists, maps, function calls, `CASE`, subqueries, operator chains) and its plan at most 128; a deeper statement fails with an error that names the limit. In 0.5.44 a very large statement could overflow the stack, after which every call into the WASM module failed, `new Database()` included. Long flat statements (an `OR` of 10,000 conditions, an `INSERT` of 10,000 patterns) now run. Via Core 0.6.0.
-- **Breaking: property values nest at most 128 levels deep**: a deeper list, map or path written through a parameter or a bulk import fails and writes nothing. Via Core 0.6.0.
-- **Breaking: exact decimals**: in GQL and SQL/PGQ a number with a point (`1.5`) is an exact decimal, so `0.1 + 0.2 = 0.3` holds; a decimal value comes back as `{ $decimal: '1.50' }` and is written the same way. A number with an exponent (`1.5e0`) stays a float, and so does Cypher's `1.5`. SPARQL follows the XPath type promotion: `5 / 2` is `2.5`. Via Core 0.6.0.
-- **Breaking: integer and decimal overflow and division by zero fail the query** with GQLSTATUS `22003` or `22012` (code `GRAFEO-Q006`), where they returned null; a float division keeps its IEEE result (`toFloat(1) / 0` is infinity). Via Core 0.6.0.
-- **Error messages start with their Grafeo code** (`GRAFEO-Q001: syntax error: ...`), and a mistake in the query is reported with the code of its kind, not `GRAFEO-X001`. Via Core 0.6.0.
-- **SPARQL `ASK` returns one row**, `[{ boolean: true }]` or `[{ boolean: false }]`; it returned the first matching row, or none for false. Via Core 0.6.0.
-- **Worker mode processes messages one at a time, in arrival order**, also those that arrive while the engine loads.
-- **The auto-created worker** is now started with a single `new Worker(new URL('./worker.js', import.meta.url), { type: 'module' })` expression, the form Vite and webpack 5 detect and bundle.
-- **Development dependencies refreshed** within their major versions (Vitest 4.1.12, happy-dom 20.14, React 19.3, Vue 3.5.44, Svelte 5.57, fake-indexeddb 6.2.6), and the CI actions to `actions/checkout@v7`, `actions/setup-node@v7` and `codecov/codecov-action@v7`.
+- **Worker mode processes messages one at a time, in arrival order** (wrapper change), also those that arrive while the engine loads.
+
+### Added
+
+From Grafeo Core 0.6.0 unless an entry is marked as a wrapper addition.
+
+- **`@grafeo-db/web/worker-client`** (wrapper addition): `GrafeoDB` with the API of the main entry, always in a Web Worker, and without importing `@grafeo-db/wasm` on the main thread. The main entry imports the engine for direct mode, and the bundler-target package fetches and compiles it (about 4 MB) as soon as it is imported, also when `create({ worker: true })` then runs everything in a worker; with the worker client only the worker loads it. Pass `{ worker }` to use a Worker your bundler builds from `@grafeo-db/web/worker-src`.
+- **`executeRaw()` takes `params`**, in every language and in the lite build, through the new `executeRawWithParams` and `executeRawWithLanguageAndParams` of the engine (lists and maps included). Previously `params` was not accepted there.
+- **Text index options**: `createTextIndex(label, property, { k1, b, tokenizer, stopWords })`, with the tokenizers `simple` (default), `standard` (every word, for languages such as Russian or Greek) and `cjk_bigram` (Chinese, Japanese, Korean). The database keeps the options with the index.
+- **Filters for text and hybrid search**: `textSearch(..., k, { filters })` and `hybridSearch(..., k, { filters })` take the property filters of `vectorSearch()` (`{ city: 'Berlin' }`, `{ rank: { $gt: 19 } }`) and search only the matching nodes, so up to `k` matching results come back.
+- **`QueryLanguage` gains `'graphql-rdf'`** (GraphQL over the triple store) **and `'sql-pgq'`** (an alias of `'sql'`), both accepted by the engine; TypeScript users no longer need a cast.
+- **`getNodeEdges(id, { direction, edgeTypes })`**: the edges of a node as `[neighborId, edgeId]` pairs, without a query; `direction` is `'out'` (default), `'in'` or `'both'`. In every build, lite included.
+- **Batch writes**: `batchCreateNodesWithProps(labels, rows)` and `batchCreateEdges([{ src, dst, type, properties }])` create many nodes or edges in one transaction and return their IDs; if one breaks a constraint or names a missing node, none is created. They commit on their own, so they throw while a transaction is open. Full build only.
+- **Upserts**: `upsertNodes(labels, rows, { key, replace })` creates or updates nodes matched by a key property (default `id`), and `upsertEdges(edgeType, rows, { key, srcField, dstField, endpointKey, endpointLabels, replace })` does the same for edges between existing nodes; both return `{ created, updated, skipped, skippedRows }` and run in the open transaction when there is one. Full build only.
+- **`batchVectorSearch(label, property, queries, k, { ef, filters })`**: several query vectors in one call, one result list per query.
+- **`executeRaw()` reports more**: `counters` (nodes, edges, properties and labels written), `kind` (`'rows'`, `'boolean'` for SPARQL `ASK`, `'graph'` for `CONSTRUCT`) and, for a `PROFILE` statement, `profile` (the operator tree, experimental).
+- **`compact()` in the lite build**, and `compact()` returns the engine's `CompactReport` (`{ checkpointed, versions_collected, rows_compressed, duration_ms }`).
+- **Worker errors keep their `name` and `gqlStatus`** (wrapper addition): an error thrown in the worker reaches the main thread with its name and, when the engine sets it, its GQLSTATUS (`22012`, `22003`, `42001`, ...), not only its message.
+- New types: `BatchEdge`, `CompactReport`, `NodeEdge`, `NodeEdgesOptions`, `SchemaEdgeType`, `TextIndexOptions`, `TextSearchOptions`, `UpsertEdgesOptions`, `UpsertNodesOptions`, `UpsertSummary`, `WorkerClientOptions`, `WriteCounters`.
 
 ### Fixed
 
+Fixes in the wrapper.
+
 - **Worker mode hung on "loading" under Vite** (and any bundler that turns the engine's `.wasm` import into a top-level await): `worker.ts` imported the engine statically, so the module, and with it the message handler, finished only after the WASM was fetched and compiled, and the `init` message `create({ worker: true })` posts right away was lost. The handler is now installed synchronously, the engine is a dynamic import inside the worker, and messages wait in a queue until it is ready. A failed engine load answers each waiting call with `Failed to load the Grafeo engine: ...` and is retried by the next call.
+- **Bundlers did not pick up the auto-created worker**: it is now started with a single `new Worker(new URL('./worker.js', import.meta.url), { type: 'module' })` expression, the form Vite and webpack 5 detect and bundle.
 - **Worker mode deleted a persisted snapshot it could not read**: direct mode keeps such a snapshot under `<key>__backup`, but the worker cleared it. The worker now keeps it too.
 - **`SchemaInfo.edge_types` had the wrong type**: `schema()` returns `[{ name, count }]` per edge type (as it does for labels), not `string[]`. The type is now `SchemaEdgeType[]`; code that read the names as strings needs `.map((t) => t.name)`.
 - **The warning for an unreadable persisted snapshot names its format and the engine**: `... "my-app" (snapshot format v4) is incompatible with this WASM version (Grafeo 0.6.0) ...`.
 
-### Compatibility
+### Upgrading
 
+- **The engine**: `@grafeo-db/wasm` and `@grafeo-db/wasm-lite` `0.6.0`, pinned to that exact version. The Publish workflow refuses to publish a stable version on an engine pre-release.
 - **Databases persisted by 0.5.x load unchanged.** The IndexedDB layout is the same, and the engine still imports the v4 snapshots that 0.5.x stored. Integration tests open a database exactly as `@grafeo-db/web` 0.5.44 stored it in IndexedDB (nodes, edges, typed properties, a property index, text and vector indexes, RDF triples) in the full build, the lite build and worker mode, and save and reopen it; the v4 snapshot exported by wasm 0.5.42 still loads too.
 - **A property index from a v4 snapshot carries over without its name**: queries keep using it, but v4 never stored the name, so `SHOW INDEXES` does not list it. Create it again under a name if you need it there.
 - **Grafeo 0.6.0 saves snapshot format v5**, which keeps the whole catalog (constraint and index names, text and vector index options, graph types). It reads v4 and v5. 0.5.x cannot read v5: a downgrade to `@grafeo-db/web` 0.5.x after the upgrade starts empty, keeping the database under `<key>__backup` in direct mode and deleting it in worker mode, so export it first.
 - **The lite build refuses a snapshot holding data it cannot keep** (RDF triples, text or vector indexes), naming that data, where 0.5.x imported it and dropped that data silently. A database the lite build made never holds them; one imported from a full-build snapshot may. `create({ persist })` keeps such a snapshot under `<key>__backup` and starts empty; open it with the full build.
-
-### Internal
-
-- Integration tests for the upgrade path above, for the worker entry on the real engine (messages posted before the engine has loaded), for every 0.6 wrapper change and for the decimal, arithmetic error, SPARQL term, `ASK` and all-or-nothing import changes on the real packages, and for the built `dist/` (the worker client and the worker load no engine statically, every `exports` path exists). New v4 fixtures exported by wasm and wasm-lite 0.5.44.
-- Unit tests for the worker queue (an engine whose evaluation and init are held open, and one that fails to load), the worker client (its module graph may not import either engine), and API parity of the worker client with `GrafeoDB`.
-- The lockstep test accepts a pre-release engine pin of the same core version during a beta, requires both wasm packages to pin the same build and the lockfile to carry the package version; with `GRAFEO_WEB_RELEASE=1` (the Publish workflow) it refuses a stable release on a pre-release engine.
-- **Publish workflow**: a pre-release version (`0.6.0-beta.1`) is published under the `next` dist-tag, as the wasm packages are, and everything else, web hotfixes included, under `latest` with an explicit tag (npm 11 requires one for a version with a pre-release part).
 
 ### Engine highlights (via Grafeo Core 0.6.0)
 
@@ -128,27 +208,19 @@ Catches up on Grafeo Core 0.6.0. Databases persisted by 0.5.x load unchanged (de
 
 ## [0.5.44] - 2026-10-04
 
-Catches up on Grafeo Core 0.5.43 + 0.5.44. No new wrapper API. The engine's correctness and consistency fixes apply transparently; the visible changes are that bulk imports now enforce the schema and that some queries which used to return wrong results now fail with an error.
+Catches up on Grafeo Core 0.5.43 and 0.5.44. No new wrapper API. The engine's correctness and consistency fixes apply transparently; the visible changes are that bulk imports now enforce the schema and that some queries which used to return wrong results now fail with an error.
 
 ### Changed
 
-- **`@grafeo-db/wasm`** and **`@grafeo-db/wasm-lite`**: updated to 0.5.44 and **pinned to that exact version** (was `^`), so each release depends on exactly the wasm build it was tested against, matching the lockstep versioning. `@grafeo-db/web` follows Grafeo's version numbers: the next release is 0.6.0 (first announced as 0.5.45), which changes the storage format.
-- **`importRows()` and `importLpg()` enforce the schema**: a row that breaks a constraint (e.g. a duplicate `UNIQUE` value) now throws, with the row named in the message (`rows[2]: ... UNIQUE constraint violation ...`). Previously it was written anyway. Rows before the failing one are kept. Via Core 0.5.44.
-- **Stricter queries, as in openCypher**: these now fail with an error instead of giving wrong or null results: an unnamed expression in `WITH`; a `CALL` subquery that reads an outer variable it does not import; `UNION` mixed with `UNION ALL`; a Cypher query that ends in a `CALL` subquery returning rows; and text after a statement, including `;`-separated statements (a trailing `;` is fine). Via Core 0.5.43 and 0.5.44.
-- **Unaliased columns are named after their expression**: `RETURN id(a), n.a + 1` yields the columns `id(a)` and `n.a + 1` (was `id(...)` and `expr`), and a result that would repeat a column name is an error asking for an alias. Via Core 0.5.43.
+Queries and imports that ran in 0.5.42 and now fail or give other results, from Grafeo Core 0.5.43 and 0.5.44.
 
-### Fixed
+- **`importRows()` and `importLpg()` enforce the schema**: a row that breaks a constraint (a duplicate `UNIQUE` value, for example) throws, with the row named in the message (`rows[2]: ... UNIQUE constraint violation ...`); it was written anyway. Rows before the failing one are kept.
+- **Stricter queries, as in openCypher**: these fail with an error instead of giving wrong or null results: an unnamed expression in `WITH`; a `CALL` subquery that reads an outer variable it does not import; `UNION` mixed with `UNION ALL`; a Cypher query that ends in a `CALL` subquery returning rows; and text after a statement, including `;`-separated statements (a trailing `;` is fine).
+- **Unaliased columns are named after their expression**: `RETURN id(a), n.a + 1` yields the columns `id(a)` and `n.a + 1` (was `id(...)` and `expr`), and a result that would repeat a column name is an error asking for an alias.
 
-- **Integration tests ran against a `--target web` build only**: `tests/integration/wasm-real.test.ts` called the module's `default` init unconditionally, which the npm package (a `--target bundler` build) does not export. It now uses the same guard as `wasm-init.ts`.
+### Upgrading
 
-### Internal
-
-- **Integration tests run in CI** on Node 22, 24 and 25, against the real `@grafeo-db/wasm` and `@grafeo-db/wasm-lite` binaries. New: both wrappers (full and lite) on the real engine with IndexedDB persistence and reload, signed snapshots, transactions (including a failed statement inside one), the import constraint checks, and a v4 snapshot exported by wasm 0.5.42 that every release must still load.
-- **Unit tests assert what they name**: every write path that saves, in the full build, the lite build and the worker, is checked to schedule exactly one save (previously several such tests asserted nothing), and `clear()` to delete the stored snapshot instead; every worker method is checked to reach the worker under its own name with its arguments; every worker handler reports `Database not initialized` after close; and import errors reach the caller in direct and worker mode. A new test keeps the wasm dependencies pinned to the release's core version.
-- **Publishing uses npm trusted publishing** (OIDC, no token) and is started by the Release workflow, so a version bump merged to `main` reaches npm without a manual step.
-
-### Compatibility
-
+- **The engine**: `@grafeo-db/wasm` and `@grafeo-db/wasm-lite` `0.5.44`, pinned to that exact version (was `^`), so each release depends on exactly the wasm build it was tested against, matching the lockstep versioning. `@grafeo-db/web` follows Grafeo's version numbers: the next release is 0.6.0 (first announced as 0.5.45), which changes the storage format.
 - **Persisted databases carry over**: the snapshot format is still v4. A snapshot exported by wasm 0.5.42 (nodes, edges, typed properties, a property index, RDF triples) imports into 0.5.44 unchanged.
 
 ### Engine highlights (via Grafeo Core 0.5.43)
@@ -158,16 +230,16 @@ Catches up on Grafeo Core 0.5.43 + 0.5.44. No new wrapper API. The engine's corr
 - **`ORDER BY ... LIMIT` over a whole-node `RETURN`** returned raw node IDs instead of node maps
 - **`UNION` with differing branches**: SPARQL returns every variable from every branch; GQL and Cypher reject branches with different columns
 - **SPARQL updates** now respect open transactions and named graphs, and `path+` returns the full transitive closure
-- **`=` and `<>` on dates, times, durations and vectors** were always false / true in expressions
+- **`=` and `<>` on dates, times, durations and vectors** were always false or true in expressions
 - **Gremlin negated text predicates**: `notRegex()`, `notContaining()`, `notStartingWith()`, `notEndingWith()`
 
 ### Engine highlights (via Grafeo Core 0.5.44)
 
 - **Every write path checks the schema**: `SET`, `REMOVE`, `SET n:Label` and `MERGE` check property types, `NOT NULL`, `UNIQUE`, `NODE KEY` and `DEFAULT` like `INSERT`; parameterized queries are checked like the same query with literals; a missing parameter fails with `Missing parameter: $e` before anything is written
-- **Constraints are stored by name**: `DROP CONSTRAINT` works, `IF NOT EXISTS` / `IF EXISTS` are supported, and `SHOW CONSTRAINTS` lists them (unnamed ones get a name such as `Person_email_unique`)
+- **Constraints are stored by name**: `DROP CONSTRAINT` works, `IF NOT EXISTS` and `IF EXISTS` are supported, and `SHOW CONSTRAINTS` lists them (unnamed ones get a name such as `Person_email_unique`)
 - **Transactions**: a failed statement inside a transaction is undone and the transaction goes on; a commit that fails on a write-write conflict no longer leaves the transaction active; commit and rollback cost only as much as the change
 - **Nodes and edges keep their kind through every clause**: after `ORDER BY`, `DISTINCT`, `UNION`, `collect()`, grouping and the like, they no longer come back as raw IDs, as `0`, or with another entity's properties
-- **`ORDER BY` uses the openCypher total order** across value types, and GQL `NULLS FIRST` / `NULLS LAST` are no longer reversed with `DESC`
+- **`ORDER BY` uses the openCypher total order** across value types, and GQL `NULLS FIRST` and `NULLS LAST` are no longer reversed with `DESC`
 - **Paths**: a variable-length edge variable is the list of the path's edges; shortest-path searches respect hop bounds and skip unreachable pairs
 - **Subqueries**: `EXISTS`, `COUNT` and `VALUE` evaluate the whole pattern per row; `CALL` subqueries see the right outer variables, and the scope clause `CALL (a, b) { ... }` parses
 - **`MERGE` binds every match**, one row each, instead of only the first
@@ -181,15 +253,15 @@ Catches up on Grafeo Core 0.5.43 + 0.5.44. No new wrapper API. The engine's corr
 
 Catches up on Grafeo Core 0.5.41 + 0.5.42. Two new wrapper APIs (explicit transactions and HMAC-signed snapshots) plus a basket of transparent engine improvements: streaming top-K, IN-list index fast path, paged HNSW topology, packed RDF Ring, wasm32 simd128 distance kernels.
 
-### Added
-
-- **Explicit transactions on `GrafeoDB`**: `beginTransaction()`, `commitTransaction()`, `rollbackTransaction()`, `isTransactionActive()`. Subsequent `execute*` calls within a transaction see each other's uncommitted writes; `commitTransaction()` schedules persistence, `rollbackTransaction()` discards pending writes. Mirrored on the lite build and routed through the worker proxy. Surfaced from Grafeo Core 0.5.41.
-- **Tamper-evident snapshots on `GrafeoDB`**: `signedExport(key)` and `signedImport(data, key)`. The export is prefixed with a `GSN1` magic header and an HMAC-SHA256 tag computed over magic + payload; `signedImport()` verifies the tag in constant time and refuses unsigned payloads, payloads signed with a different key, and truncated input. Recommended whenever snapshots travel through locations the user cannot fully trust (IndexedDB, server storage, shared URLs). Mirrored on the lite build and routed through the worker proxy. Surfaced from Grafeo Core 0.5.41.
-
 ### Changed
 
 - **`@grafeo-db/wasm`**: updated to 0.5.42
 - **`@grafeo-db/wasm-lite`**: updated to 0.5.42
+
+### Added
+
+- **Explicit transactions on `GrafeoDB`**: `beginTransaction()`, `commitTransaction()`, `rollbackTransaction()`, `isTransactionActive()`. Subsequent `execute*` calls within a transaction see each other's uncommitted writes; `commitTransaction()` schedules persistence, `rollbackTransaction()` discards pending writes. Mirrored on the lite build and routed through the worker proxy. Surfaced from Grafeo Core 0.5.41.
+- **Tamper-evident snapshots on `GrafeoDB`**: `signedExport(key)` and `signedImport(data, key)`. The export is prefixed with a `GSN1` magic header and an HMAC-SHA256 tag computed over magic + payload; `signedImport()` verifies the tag in constant time and refuses unsigned payloads, payloads signed with a different key, and truncated input. Recommended whenever snapshots travel through locations the user cannot fully trust (IndexedDB, server storage, shared URLs). Mirrored on the lite build and routed through the worker proxy. Surfaced from Grafeo Core 0.5.41.
 
 ### Engine highlights (via Grafeo Core 0.5.41)
 
@@ -215,13 +287,13 @@ Catches up on Grafeo Core 0.5.41 + 0.5.42. Two new wrapper APIs (explicit transa
 
 ## [0.5.40-hotfix.1] - 2026-04-20
 
-### Fixed
-
-- **WASM init compatibility with `--target bundler` builds**: `wasm-init.ts`, `wasm-init-lite.ts`, and `worker.ts` unconditionally called the `default` export of `@grafeo-db/wasm` / `@grafeo-db/wasm-lite`. When the underlying package is built with `wasm-pack --target bundler`, the module auto-initializes on import and exposes no `default` export, so the call threw at `create()`. The initializers now use a namespace import and only invoke `default()` when it exists; otherwise they resolve immediately. Users on wasm packages built with `--target web` (which ship a `__wbg_init` default export) are unaffected.
-
 ### Added
 
 - **Integration test: advertised query languages are compiled in**: `tests/integration/wasm-real.test.ts` now probes every language exposed through `executeWithLanguage()` (`gql`, `cypher`, `sparql`, `gremlin`, `graphql`, `sql`) and asserts the dispatcher does not return "Unknown query language". This guards against the wasm package being accidentally built with a narrow feature set (e.g. `--features ai`) instead of `--features full`.
+
+### Fixed
+
+- **WASM init compatibility with `--target bundler` builds**: `wasm-init.ts`, `wasm-init-lite.ts`, and `worker.ts` unconditionally called the `default` export of `@grafeo-db/wasm` / `@grafeo-db/wasm-lite`. When the underlying package is built with `wasm-pack --target bundler`, the module auto-initializes on import and exposes no `default` export, so the call threw at `create()`. The initializers now use a namespace import and only invoke `default()` when it exists; otherwise they resolve immediately. Users on wasm packages built with `--target web` (which ship a `__wbg_init` default export) are unaffected.
 
 ## [0.5.40] - 2026-04-20
 
@@ -255,12 +327,18 @@ Upstream 0.5.39 + 0.5.40 features. No new WASM API surface; version bump, docume
 - **Leaner WASM builds** (0.5.39): removed `grafeo-storage`, `crc32fast`, `anyhow` from WASM targets; binary size now ~650 KB gzipped
 - Not yet in WASM: streaming results (`executeStream()` is Node.js-only), `metrics()` / `metricsPrometheus()` (Python/Node.js), encryption at rest, `GrafeoError` structured errors
 
-
 ## [0.5.38] - 2026-04-13
 
 Hardening release, plus upstream 0.5.38 features.
 
 **Breaking:** `changesSince()` now throws an error instead of silently returning an empty array. Code that called `changesSince()` and handled the empty result will need a try/catch or should remove the call until the WASM engine exposes change tracking. `executeRaw()` signature narrowed from `ExecuteOptions` to `Pick<ExecuteOptions, 'language'>`: code that passed `params` to `executeRaw()` will get a TypeScript error (params were silently ignored before, so removing them is the correct fix).
+
+### Changed
+
+- **`@grafeo-db/wasm`**: updated to 0.5.38
+- **`@grafeo-db/wasm-lite`**: updated to 0.5.38
+- **`changesSince()` throws**: now throws `"not yet implemented"` instead of silently returning `[]`
+- **`executeRaw()` type narrowed**: signature changed from `ExecuteOptions` to `Pick<ExecuteOptions, 'language'>` to clarify that `params` is not supported for raw queries
 
 ### Added
 
@@ -281,13 +359,6 @@ Hardening release, plus upstream 0.5.38 features.
 - **Svelte `createQuery` double-unsubscribe**: a guard flag prevents `unsubscribeDb()` from being called multiple times when stores unsubscribe concurrently
 - **Snapshot migration backup**: when a persisted snapshot is incompatible with the current WASM version, it is now saved under a `__backup` key before clearing, preventing silent data loss
 
-### Changed
-
-- **`@grafeo-db/wasm`**: updated to 0.5.38
-- **`@grafeo-db/wasm-lite`**: updated to 0.5.38
-- **`changesSince()` throws**: now throws `"not yet implemented"` instead of silently returning `[]`
-- **`executeRaw()` type narrowed**: signature changed from `ExecuteOptions` to `Pick<ExecuteOptions, 'language'>` to clarify that `params` is not supported for raw queries
-
 ### Engine highlights (via Grafeo Core 0.5.38)
 
 - **Quantized vector indexes**: `"scalar"`, `"binary"`, `"product"` quantization for up to 4x memory savings
@@ -298,7 +369,6 @@ Hardening release, plus upstream 0.5.38 features.
 - **Edge variables in multi-hop queries**: edge columns now resolve to full maps instead of raw IDs
 - **GQL `!=` operator**: accepted as alias for `<>`
 
-
 ## [0.5.37] - 2026-04-12
 
 _Align with Grafeo Core 0.5.37_
@@ -308,10 +378,15 @@ _Align with Grafeo Core 0.5.37_
 - **`@grafeo-db/wasm`**: updated to 0.5.37
 - **`@grafeo-db/wasm-lite`**: updated to 0.5.37
 
-
 ## [0.5.36] - 2026-04-11
 
 _Align with Grafeo Core 0.5.36_
+
+### Changed
+
+- **`@grafeo-db/wasm`**: updated to 0.5.36
+- **`@grafeo-db/wasm-lite`**: updated to 0.5.36
+- **WASM type declarations**: version comment updated to v0.5.36, added 3 projection methods to both full and lite module declarations
 
 ### Added
 
@@ -321,12 +396,6 @@ _Align with Grafeo Core 0.5.36_
   - `listProjections()`: list the names of all active projections
 - Worker and proxy layers updated to route all projection methods
 - 21 new tests covering projections (direct, worker proxy, lite, persistence, closed-db guards)
-
-### Changed
-
-- **`@grafeo-db/wasm`**: updated to 0.5.36
-- **`@grafeo-db/wasm-lite`**: updated to 0.5.36
-- **WASM type declarations**: version comment updated to v0.5.36, added 3 projection methods to both full and lite module declarations
 
 ### Engine highlights (via Grafeo Core 0.5.36)
 
@@ -338,26 +407,22 @@ _Align with Grafeo Core 0.5.36_
 - **`session_read_only()` deprecated**: use `session_with_role(Role::ReadOnly)` instead
 - **Bug fixes**: parameterized query permission bypass, projection neighbor/edge-type leakage, spill serialization DISTINCT semantics, Gremlin negative `times()`, stale projections after `compact()`
 
-
 ## [0.5.35] - 2026-04-11
 
 _Align with Grafeo Core 0.5.35_
 
-### Breaking
+### Changed
 
 - **Storage format changed**: Grafeo Core 0.5.35 switched from bincode blobs to a block-based section format. Databases persisted to IndexedDB with 0.5.34 or earlier are **incompatible**. Export your data (`db.export()`) before upgrading, then re-import (`db.import(snapshot)`) after. If an incompatible snapshot is detected, `create()` now logs a warning and starts a fresh database instead of crashing.
 - **Feature profile rename**: the `rdf` WASM feature flag has been renamed to `triple-store`. The old `rdf` alias still works in this release but is deprecated and will be removed in 0.7.0. Persona-based profiles (`lpg`, `rdf`, `analytics`, `ai`, `edge`, `enterprise`) replace the old deployment-target profiles (`embedded`, `browser`, `server`, `full`).
+- **`@grafeo-db/wasm`**: updated to 0.5.35
+- **`@grafeo-db/wasm-lite`**: updated to 0.5.35
+- **WASM type declarations**: version comment updated to v0.5.35, added `compact()` method
 
 ### Added
 
 - **`compact()`**: converts the database to CompactStore format for read-optimized, memory-constrained use. Requires `compact-store` WASM feature. Available in direct, worker, and proxy modes.
 - **Snapshot migration guard**: `GrafeoDB.create({ persist: '...' })` now catches incompatible snapshots from older WASM versions, clears the stale IndexedDB entry, and starts fresh with a console warning.
-
-### Changed
-
-- **`@grafeo-db/wasm`**: updated to 0.5.35
-- **`@grafeo-db/wasm-lite`**: updated to 0.5.35
-- **WASM type declarations**: version comment updated to v0.5.35, added `compact()` method
 
 ### Engine highlights (via Grafeo Core 0.5.35)
 
@@ -374,12 +439,23 @@ _Align with Grafeo Core 0.5.35_
 - **`#[non_exhaustive]` on 95 public enums** in the Rust API, no impact on WASM/JS surface
 - **WAL replay fix**: data written via mutations was previously lost across restarts when no explicit checkpoint was called
 
-
 ## [0.5.34] - 2026-04-07
 
 _Align with Grafeo Core 0.5.34_
 
 Test coverage, dependency updates and documentation fixes.
+
+### Changed
+
+- TypeScript bumped from ^5.3.0 to ^5.8.0
+- vitest bumped from ^4.0.18 to ^4.1.2
+- happy-dom bumped from ^20.6.1 to ^20.8.9
+- `@grafeo-db/wasm` and `@grafeo-db/wasm-lite` bumped from ^0.5.31 to ^0.5.33
+- README: added Worker vs Direct mode guide with bundler examples (Vite, Webpack, Next.js)
+- README: added Troubleshooting section (slow queries, IndexedDB quota, worker setup)
+- 201 tests passing
+- **`@grafeo-db/wasm`**: updated to 0.5.34
+- **`@grafeo-db/wasm-lite`**: updated to 0.5.34
 
 ### Added
 
@@ -396,22 +472,6 @@ Test coverage, dependency updates and documentation fixes.
 - README: version example updated from 0.5.27 to 0.5.31
 - `.claude/CLAUDE.md`: stale persistence lesson corrected
 
-### Changed
-
-- TypeScript bumped from ^5.3.0 to ^5.8.0
-- vitest bumped from ^4.0.18 to ^4.1.2
-- happy-dom bumped from ^20.6.1 to ^20.8.9
-- `@grafeo-db/wasm` and `@grafeo-db/wasm-lite` bumped from ^0.5.31 to ^0.5.33
-- README: added Worker vs Direct mode guide with bundler examples (Vite, Webpack, Next.js)
-- README: added Troubleshooting section (slow queries, IndexedDB quota, worker setup)
-- 201 tests passing
-
-### Changed
-
-- **`@grafeo-db/wasm`**: updated to 0.5.34
-- **`@grafeo-db/wasm-lite`**: updated to 0.5.34
-
-
 ## [0.5.33] - 2026-04-05
 
 _Align with Grafeo Core 0.5.33_
@@ -420,7 +480,6 @@ _Align with Grafeo Core 0.5.33_
 
 - **`@grafeo-db/wasm`**: updated to 0.5.33
 - **`@grafeo-db/wasm-lite`**: updated to 0.5.33
-
 
 ## [0.5.32] - 2026-04-03
 
@@ -431,21 +490,20 @@ _Align with Grafeo Core 0.5.32_
 - **`@grafeo-db/wasm`**: updated to 0.5.32
 - **`@grafeo-db/wasm-lite`**: updated to 0.5.32
 
-
 ## [0.5.31] - 2026-04-01
 
 _Align with Grafeo Core 0.5.31_
-
-### Added
-
-- **`info()`**: returns high-level database information (mode, counts, persistence status, version, compiled feature flags). Available in full, lite, and worker builds
-- **`DatabaseInfo` type**: typed interface for the `info()` return value
 
 ### Changed
 
 - **`@grafeo-db/wasm`**: updated to 0.5.31
 - **`@grafeo-db/wasm-lite`**: updated to 0.5.31
 - **WASM type declarations**: version comment updated to v0.5.31, added `info()` method
+
+### Added
+
+- **`info()`**: returns high-level database information (mode, counts, persistence status, version, compiled feature flags). Available in full, lite, and worker builds
+- **`DatabaseInfo` type**: typed interface for the `info()` return value
 
 ### Engine highlights (via Grafeo Core 0.5.31)
 
@@ -458,7 +516,6 @@ _Align with Grafeo Core 0.5.31_
 - **Cypher `CREATE INDEX` / `DROP INDEX` / `SHOW INDEXES`**: indexes now registered in catalog
 - **GraphQL aggregation**: `personCount`, `personAggregate`, and `_count` field patterns
 - **RDF schema type propagation**: concrete types threaded through plan tree, ~5x memory reduction for triple scan columns
-
 
 ## [0.5.30] - 2026-03-30
 
@@ -487,22 +544,21 @@ _Align with Grafeo Core 0.5.28-0.5.30_
 - **Memory optimization** (0.5.29): adjacency list struct reduced from 256 to ~144 bytes with auto-compaction
 - **JSON Infinity/NaN** (0.5.29): `SUM()` overflow encoded as string `"Infinity"` instead of `null`
 
-
 ## [0.5.27] - 2026-03-27
 
 _Align with Grafeo Core 0.5.27_
-
-### Added
-
-- **Schema context methods**: `setSchema(name)`, `resetSchema()`, `currentSchema()` for multi-schema workflows. Persists across `execute()` calls
-- **`clearPlanCache()`**: clears cached query plans, useful after schema or index changes
-- Worker and proxy layers updated to route all new methods
 
 ### Changed
 
 - **`@grafeo-db/wasm`**: updated to 0.5.27
 - **`@grafeo-db/wasm-lite`**: updated to 0.5.27
 - **WASM type declarations**: updated from v0.5.21 to v0.5.27 surface (4 new methods)
+
+### Added
+
+- **Schema context methods**: `setSchema(name)`, `resetSchema()`, `currentSchema()` for multi-schema workflows. Persists across `execute()` calls
+- **`clearPlanCache()`**: clears cached query plans, useful after schema or index changes
+- Worker and proxy layers updated to route all new methods
 
 ### Engine highlights (via Grafeo Core 0.5.25-0.5.27)
 
@@ -513,7 +569,6 @@ _Align with Grafeo Core 0.5.27_
 - **Vector search filter optimization**: operator filters ($gt, $lt, etc.) now scan only the narrowed allowlist instead of all nodes
 - **Adjacency inline capacity**: raised SmallVec from 4 to 8, fewer heap allocations for typical node degrees
 
-
 ## [0.5.26] - 2026-03-26
 
 _Align with Grafeo Core 0.5.26_
@@ -522,7 +577,6 @@ _Align with Grafeo Core 0.5.26_
 
 - **`@grafeo-db/wasm`**: updated to 0.5.26
 - **`@grafeo-db/wasm-lite`**: updated to 0.5.26
-
 
 ## [0.5.25] - 2026-03-25
 
@@ -533,7 +587,6 @@ _Align with Grafeo Core 0.5.25_
 - **`@grafeo-db/wasm`**: updated to 0.5.25
 - **`@grafeo-db/wasm-lite`**: updated to 0.5.25
 
-
 ## [0.5.24] - 2026-03-24
 
 _Align with Grafeo Core 0.5.24_
@@ -542,7 +595,6 @@ _Align with Grafeo Core 0.5.24_
 
 - **`@grafeo-db/wasm`**: updated to 0.5.24
 - **`@grafeo-db/wasm-lite`**: updated to 0.5.24
-
 
 ## [0.5.23] - 2026-03-23
 
@@ -553,7 +605,6 @@ _Align with Grafeo Core 0.5.23_
 - **`@grafeo-db/wasm`**: updated to 0.5.23
 - **`@grafeo-db/wasm-lite`**: updated to 0.5.23
 
-
 ## [0.5.22] - 2026-03-14
 
 _Align with Grafeo Core 0.5.22_
@@ -563,14 +614,9 @@ _Align with Grafeo Core 0.5.22_
 - **`@grafeo-db/wasm`**: updated to 0.5.22
 - **`@grafeo-db/wasm-lite`**: updated to 0.5.22
 
-
 ## [0.5.21] - 2026-03-13
 
 _Align with Grafeo Core 0.5.21_
-
-### Added
-
-- **Language-specific execute methods** in WASM type declarations: `executeCypher()`, `executeGremlin()`, `executeGraphql()`, `executeSparql()`, `executeSql()` (feature-gated convenience shortcuts)
 
 ### Changed
 
@@ -579,6 +625,9 @@ _Align with Grafeo Core 0.5.21_
 - **Node.js requirement**: bumped from >=18 to >=22 (Node 18 is EOL)
 - **CI matrix**: updated to Node 22, 24, 25
 
+### Added
+
+- **Language-specific execute methods** in WASM type declarations: `executeCypher()`, `executeGremlin()`, `executeGraphql()`, `executeSparql()`, `executeSql()` (feature-gated convenience shortcuts)
 
 ## [0.5.20] - 2026-03-11
 
@@ -602,10 +651,15 @@ _Align with Grafeo Core 0.5.20_
 - **WASM `memoryUsage()` and `importRows()`**: memory introspection and bulk row import now available in WebAssembly bindings
 - **SESSION SET GRAPH validation**: now errors when target graph does not exist
 
-
 ## [0.5.19] - 2026-03-11
 
 _Align with Grafeo Core 0.5.19_
+
+### Changed
+
+- **`@grafeo-db/wasm`**: updated to 0.5.19
+- **`@grafeo-db/wasm-lite`**: updated to 0.5.19
+- **WASM type declarations**: updated from v0.5.10 to v0.5.19 surface (added `importLpg`, `importRdf`)
 
 ### Added
 
@@ -614,12 +668,6 @@ _Align with Grafeo Core 0.5.19_
 - **New types**: `LpgImportData`, `LpgImportResult`, `RdfImportData`, `RdfImportResult`
 - Worker and proxy layers updated to route `importLpg` and `importRdf`
 
-### Changed
-
-- **`@grafeo-db/wasm`**: updated to 0.5.19
-- **`@grafeo-db/wasm-lite`**: updated to 0.5.19
-- **WASM type declarations**: updated from v0.5.10 to v0.5.19 surface (added `importLpg`, `importRdf`)
-
 ### Engine highlights (via Grafeo Core 0.5.17-0.5.19)
 
 - **Named graphs**: `SHOW GRAPHS`, `USE GRAPH`, `SESSION SET GRAPH`, cross-graph transactions
@@ -627,7 +675,6 @@ _Align with Grafeo Core 0.5.19_
 - **LOAD DATA**: multi-format import (CSV, JSONL, Parquet) via GQL/Cypher queries
 - **RDF persistence**: SPARQL mutations now WAL-logged and snapshot-persisted
 - **Cypher/GQL compliance**: 1,300+ new spec tests, correlated EXISTS, CASE WHEN fixes
-
 
 ## [0.5.18] - 2026-03-09
 
@@ -638,7 +685,6 @@ _Align with Grafeo Core 0.5.18_
 - **`@grafeo-db/wasm`**: updated to 0.5.18
 - **`@grafeo-db/wasm-lite`**: updated to 0.5.18
 
-
 ## [0.5.17] - 2026-03-08
 
 _Align with Grafeo Core 0.5.17_
@@ -647,7 +693,6 @@ _Align with Grafeo Core 0.5.17_
 
 - **`@grafeo-db/wasm`**: updated to 0.5.17
 - **`@grafeo-db/wasm-lite`**: updated to 0.5.17
-
 
 ## [0.5.16] - 2026-03-08
 
@@ -658,7 +703,6 @@ _Align with Grafeo Core 0.5.16_
 - **`@grafeo-db/wasm`**: updated to 0.5.16
 - **`@grafeo-db/wasm-lite`**: updated to 0.5.16
 
-
 ## [0.5.13] - 2026-03-04
 
 _Align with Grafeo Core 0.5.13_
@@ -667,7 +711,6 @@ _Align with Grafeo Core 0.5.13_
 
 - **`@grafeo-db/wasm`**: updated to 0.5.13
 
-
 ## [0.5.12] - 2026-03-02
 
 _Align with Grafeo Core 0.5.12_
@@ -675,7 +718,6 @@ _Align with Grafeo Core 0.5.12_
 ### Changed
 
 - **`@grafeo-db/wasm`**: updated to 0.5.12
-
 
 ## [0.5.11] - 2026-03-02
 
@@ -689,6 +731,12 @@ _Align with Grafeo Core 0.5.11_
 
 _Align with Grafeo Core 0.5.10_
 
+### Changed
+
+- **`@grafeo-db/wasm`**: dependency range covers 0.5.x (was `^0.5.0`)
+- **WASM type declarations**: updated from v0.5.0 to v0.5.10 surface (13 new methods)
+- Worker and proxy layers updated to route all new methods
+
 ### Added
 
 - **Parameterized queries**: `execute(query, { params: { name: 'Alice' } })` binds `$name`-style parameters via WASM `executeWithParams` / `executeWithLanguageAndParams`
@@ -700,12 +748,6 @@ _Align with Grafeo Core 0.5.10_
 - **`LiteExecuteOptions` type**: params-only options for the lite build
 - **Feature-gate errors**: descriptive messages when calling text/hybrid methods on a WASM binary built without the required feature
 - **Lite params support**: `GrafeoDB.execute(query, { params })` now works in the lite build
-
-### Changed
-
-- **`@grafeo-db/wasm`**: dependency range covers 0.5.x (was `^0.5.0`)
-- **WASM type declarations**: updated from v0.5.0 to v0.5.10 surface (13 new methods)
-- Worker and proxy layers updated to route all new methods
 
 ## [0.5.1] - 2026-02-12
 
@@ -729,18 +771,18 @@ _Upgrade to Grafeo WASM 0.5.0_
 
 _Release Prep - Framework Parity, CI, Demo_
 
+### Changed
+
+- **`@grafeo-db/wasm` from npm**: dependency now points to `^0.4.3` on the npm registry (was a local `file:` link)
+- **vitest 4.x compatibility**: updated worker-proxy test mocks to use `function` syntax for constructor mocks
+- Test count: 68 total (up from 63)
+
 ### Added
 
 - **Svelte `createQuery`** (`src/svelte.ts`): new store factory for reactive queries with `{ data, loading, error, refetch }`, matching the React/Vue API
 - **`ExecuteOptions` in Vue/Svelte**: `useQuery()` and `createQuery()` now accept `{ language }` option, aligning all three frameworks
 - **CI test step**: `npm test` now runs in the GitHub Actions pipeline across Node.js 18/20/22
 - **Interactive demo** (`demo/index.html`): standalone Grafeo Playground with query editor, sample data, and table results
-
-### Changed
-
-- **`@grafeo-db/wasm` from npm**: dependency now points to `^0.4.3` on the npm registry (was a local `file:` link)
-- **vitest 4.x compatibility**: updated worker-proxy test mocks to use `function` syntax for constructor mocks
-- Test count: 68 total (up from 63)
 
 ### Removed
 
@@ -750,21 +792,26 @@ _Release Prep - Framework Parity, CI, Demo_
 
 _Upgrade to Grafeo WASM 0.4.3 - Full API Support_
 
-### Added
-
-- **Multi-language query support**: `execute(query, { language: 'cypher' })` now routes to `executeWithLanguage()` in the WASM engine. Supported: `gql`, `cypher`, `sparql`, `gremlin`, `graphql`
-- **`db.schema()`**: returns schema information (labels, edge types, property keys) from the WASM engine
-- **Real snapshot persistence**: `exportSnapshot()` and `importSnapshot()` are now backed by the Rust implementation (previously were stubs)
-
 ### Changed
 
 - **WASM 0.4.3**: upgraded from 0.4.2 - includes `executeWithLanguage`, `exportSnapshot`/`importSnapshot`, and `schema`
 - **`importSnapshot` is now static**: creates a new `Database` instance from snapshot bytes (was an instance method). This changes the internal persistence restore and `import()` flows
 - Mock updated to match 0.4.3 API surface (`executeWithLanguage`, `schema`, static `importSnapshot`)
 
+### Added
+
+- **Multi-language query support**: `execute(query, { language: 'cypher' })` now routes to `executeWithLanguage()` in the WASM engine. Supported: `gql`, `cypher`, `sparql`, `gremlin`, `graphql`
+- **`db.schema()`**: returns schema information (labels, edge types, property keys) from the WASM engine
+- **Real snapshot persistence**: `exportSnapshot()` and `importSnapshot()` are now backed by the Rust implementation (previously were stubs)
+
 ## [0.1.3] - 2026-02-08
 
 _Test Coverage & Code Cleanup_
+
+### Changed
+
+- Extracted `isMutatingQuery()` to shared `src/query-utils.ts` (was duplicated in index.ts, lite.ts, worker.ts)
+- Test count: 63 total (up from 35)
 
 ### Added
 
@@ -773,14 +820,15 @@ _Test Coverage & Code Cleanup_
 - **React hook tests** (`src/react.test.ts`): 6 tests covering `useGrafeo()` lifecycle, unmount cleanup, error handling, `useQuery()` execution
 - **Worker proxy tests** (`src/worker-proxy.test.ts`): 9 tests covering init, execute, executeRaw, nodeCount/edgeCount, close, error responses, and worker crash handling
 
-### Changed
-
-- Extracted `isMutatingQuery()` to shared `src/query-utils.ts` (was duplicated in index.ts, lite.ts, worker.ts)
-- Test count: 63 total (up from 35)
-
 ## [0.1.2] - 2026-02-08
 
 _Bug Fixes & Robustness_
+
+### Added
+
+- `GrafeoDB.version()` static method exposing the WASM engine version
+- `db.isOpen` getter for checking database state without try/catch
+- Test suite for the lite build (`src/lite.test.ts`)
 
 ### Fixed
 
@@ -788,12 +836,6 @@ _Bug Fixes & Robustness_
 - **Duplicate WASM init**: `index.ts` and `lite.ts` now share a single initialization, preventing double-loading when both modules are imported
 - **Unnecessary persistence writes**: `execute()` and `executeRaw()` no longer trigger IndexedDB saves for read-only queries (MATCH); only mutating queries (INSERT, CREATE, DELETE, etc) schedule persistence
 - **Silent persistence failures**: `scheduleSave()` now catches errors in the debounced callback and reports them via a configurable `onError` handler (defaults to `console.error`)
-
-### Added
-
-- `GrafeoDB.version()` static method exposing the WASM engine version
-- `db.isOpen` getter for checking database state without try/catch
-- Test suite for the lite build (`src/lite.test.ts`)
 
 ## [0.1.1] - 2026-02-08
 

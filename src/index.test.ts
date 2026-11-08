@@ -127,6 +127,12 @@ describe('GrafeoDB', () => {
       expect(result.rows).toHaveLength(1);
       expect(result.executionTimeMs).toBeDefined();
     });
+
+    it('always returns warnings, empty when the statement raised none (0.6.2)', async () => {
+      await db.execute("INSERT (:Person {name: 'Alice'})");
+      const result = await db.executeRaw('MATCH (p:Person) RETURN p.name');
+      expect(result.warnings).toEqual([]);
+    });
   });
 
   describe('nodeCount() / edgeCount()', () => {

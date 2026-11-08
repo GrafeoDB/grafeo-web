@@ -92,6 +92,15 @@ export interface WriteCounters {
   labelsRemoved: number;
 }
 
+/** A warning a statement raised, as `executeRaw()` reports it. */
+export interface QueryWarning {
+  /** The GQLSTATUS code of the warning, class `01`. */
+  code: string;
+  /** What the warning is: a `deprecation` or a `notice`. */
+  kind: 'deprecation' | 'notice';
+  message: string;
+}
+
 /** Raw query result with column metadata. */
 export interface RawQueryResult {
   columns: string[];
@@ -101,6 +110,12 @@ export interface RawQueryResult {
   kind?: 'rows' | 'boolean' | 'graph';
   /** What the statement wrote; all zero for a read. */
   counters?: WriteCounters;
+  /**
+   * What the statement raised, each `{ code, kind, message }`, ordered by code; always present, empty when none.
+   *
+   * @experimental New in 0.6.2; new warnings and kinds may come.
+   */
+  warnings: QueryWarning[];
   /**
    * The operator tree of a `PROFILE` statement, as data.
    *
