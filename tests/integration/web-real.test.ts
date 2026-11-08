@@ -209,7 +209,7 @@ describe('upgrade: databases persisted by @grafeo-db/web 0.5.44', () => {
       const db = await GrafeoDBLite.create({ persist: key });
       expect(await db.nodeCount()).toBe(0);
       expect(warn).toHaveBeenCalledWith(
-        expect.stringMatching(/"it-upgrade-lite-refused" \(snapshot format v4\) is incompatible .*Grafeo 0\.6\.1/),
+        expect.stringMatching(/"it-upgrade-lite-refused" \(snapshot format v4\) is incompatible .*Grafeo 0\.6\.2/),
         expect.objectContaining({ message: expect.stringContaining('GRAFEO-V001') }),
       );
       expect(await storedSnapshot(`${key}__backup`)).toEqual(original);
@@ -451,7 +451,7 @@ describe('0.6 engine through the wrapper', () => {
 describe('GrafeoDB lite on real wasm-lite', () => {
   it('runs GQL and reports its version', async () => {
     const db = await GrafeoDBLite.create();
-    expect((await db.info()).version).toMatch(/^0\.6\.1($|-)/);
+    expect((await db.info()).version).toMatch(/^0\.6\.2($|-)/);
     await db.execute("INSERT (:Person {name: 'Alix'})-[:KNOWS]->(:Person {name: 'Gus'})");
     expect(await db.execute('MATCH (a)-[:KNOWS]->(b) RETURN a.name, b.name')).toEqual([
       { 'a.name': 'Alix', 'b.name': 'Gus' },

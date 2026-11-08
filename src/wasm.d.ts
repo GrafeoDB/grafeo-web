@@ -2,7 +2,7 @@
  * Type declarations for @grafeo-db/wasm and @grafeo-db/wasm-lite.
  *
  * These mirror the wasm-bindgen generated types of the WASM crate
- * (0.6.1), with the result shapes the generated `any` leaves out.
+ * (0.6.2), with the result shapes the generated `any` leaves out.
  * The lite variant leaves out the other query languages and the AI search
  * features at the WASM level.
  */
@@ -21,6 +21,7 @@ declare module '@grafeo-db/wasm' {
       columns: string[];
       rows: unknown[][];
       executionTimeMs?: number;
+      warnings?: { code: string; kind: string; message: string }[];
     };
 
     /**
@@ -54,6 +55,7 @@ declare module '@grafeo-db/wasm' {
       columns: string[];
       rows: unknown[][];
       executionTimeMs?: number;
+      warnings?: { code: string; kind: string; message: string }[];
     };
 
     /** Executes a GQL query with parameters and returns raw columns/rows (0.6). */
@@ -64,6 +66,7 @@ declare module '@grafeo-db/wasm' {
       columns: string[];
       rows: unknown[][];
       executionTimeMs?: number;
+      warnings?: { code: string; kind: string; message: string }[];
     };
 
     /** Executes a query in a language with parameters and returns raw columns/rows (0.6). */
@@ -75,6 +78,7 @@ declare module '@grafeo-db/wasm' {
       columns: string[];
       rows: unknown[][];
       executionTimeMs?: number;
+      warnings?: { code: string; kind: string; message: string }[];
     };
 
     /** Executes a Cypher query. Requires 'cypher' WASM feature. */
@@ -361,6 +365,7 @@ declare module '@grafeo-db/wasm-lite' {
       columns: string[];
       rows: unknown[][];
       executionTimeMs?: number;
+      warnings?: { code: string; kind: string; message: string }[];
     };
     executeWithParams(
       query: string,
@@ -373,6 +378,7 @@ declare module '@grafeo-db/wasm-lite' {
       columns: string[];
       rows: unknown[][];
       executionTimeMs?: number;
+      warnings?: { code: string; kind: string; message: string }[];
     };
     compact(): { checkpointed: boolean; versions_collected: number; rows_compressed: number; duration_ms: number };
     nodeCount(): number;

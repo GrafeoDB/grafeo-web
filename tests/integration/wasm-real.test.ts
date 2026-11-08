@@ -33,7 +33,7 @@ describe('Real WASM: Database basics', () => {
   it('creates a database and returns version', () => {
     const version = Database.version();
     expect(version).toMatch(/^\d+\.\d+\.\d+/);
-    expect(version).toMatch(/^0\.6\.1($|-)/);
+    expect(version).toMatch(/^0\.6\.2($|-)/);
     expect(LiteDatabase.version()).toBe(version);
   });
 
@@ -587,12 +587,15 @@ describe('Real WASM: 0.6.1 behaviour', () => {
     db.free();
   });
 
-  it('SERIALIZABLE is refused instead of running as snapshot isolation', () => {
+  it('START TRANSACTION ISOLATION LEVEL through execute() is refused and holds nothing open (0.6.2)', () => {
     const db = new Database();
+    // 0.6.2 refuses START TRANSACTION on a per-call execute outright, before the
+    // isolation level is read; 0.6.1 refused SERIALIZABLE itself with GRAFEO-Q004.
     expect(failure(() => db.execute('START TRANSACTION ISOLATION LEVEL SERIALIZABLE'))).toMatchObject({
-      message: expect.stringMatching(/^GRAFEO-Q004: /),
-      gqlStatus: '42000',
+      message: expect.stringMatching(/^GRAFEO-T004: /),
+      gqlStatus: '25000',
     });
+    expect(db.isTransactionActive()).toBe(false);
     db.free();
   });
 
@@ -654,6 +657,92 @@ describe('Real WASM: 0.6.1 behaviour', () => {
     );
     db.free();
     again.free();
+  });
+});
+
+describe('Real WASM: 0.6.2 behaviour', () => {
+  const failure = (run: () => unknown) => {
+    try {
+      run();
+    } catch (error) {
+      return error as Error & { gqlStatus?: string };
+    }
+    throw new Error('it did not fail');
+  };
+
+  it.each([
+    ['wasm', () => new Database()],
+    ['wasm-lite', () => new LiteDatabase()],
+  ])('%s: a string never equals a number, and + on a string and a number raises 22G12', (_name, make) => {
+    const db = make();
+    expect(db.execute("RETURN '5' = 5 AS eq, '5' <> 5 AS ne")).toEqual([{ eq: false, ne: true }]);
+    expect(failure(() => db.execute("RETURN 'x' + 3 AS v"))).toMatchObject({ gqlStatus: '22G12' });
+    db.free();
+  });
+
+  it('a null in a property map finds nothing', () => {
+    const db = new Database();
+    db.execute("INSERT (:Person {name: 'Alix'})");
+    expect(db.execute('MATCH (n {name: NULL}) RETURN n')).toEqual([]);
+    expect(db.execute("MATCH (n:Person {name: 'Alix'}) RETURN n.name")).toEqual([{ 'n.name': 'Alix' }]);
+    db.free();
+  });
+
+  it('executeRaw returns warnings: empty when none, a deprecation for a deprecated literal', () => {
+    const db = new Database();
+    expect(db.executeRaw('RETURN 1 AS one').warnings).toEqual([]);
+    expect(db.executeRaw("RETURN ZONED DATETIME '2024-01-01T10:00:00Z' AS t").warnings).toEqual([
+      expect.objectContaining({ code: '01X01', kind: 'deprecation' }),
+    ]);
+    db.free();
+  });
+
+  it('importRdf works in the full build; lite has no importRdf', () => {
+    const db = new Database();
+    const result = db.importRdf({
+      triples: [
+        {
+          subject: 'http://ex/Alix',
+          predicate: 'http://www.w3.org/1999/02/22-rdf-syntax-ns#type',
+          object: 'http://ex/Person',
+        },
+        { subject: 'http://ex/Alix', predicate: 'http://ex/name', object: { value: 'Alix' } },
+      ],
+    });
+    expect(result).toEqual({ triples: 2 });
+    expect(
+      db.executeWithLanguage('SELECT ?o WHERE { <http://ex/Alix> <http://ex/name> ?o }', 'sparql'),
+    ).toHaveLength(1);
+    db.free();
+    const lite = new LiteDatabase();
+    expect((lite as unknown as Record<string, unknown>).importRdf).toBeUndefined();
+    lite.free();
+  });
+
+  it('lite answers a catalog CALL and refuses a procedure the build lacks, naming the feature', () => {
+    const lite = new LiteDatabase();
+    lite.execute("INSERT (:Person {name: 'Alix'})");
+    expect(lite.execute('CALL grafeo.labels()')).toEqual([{ label: 'Person' }]);
+    expect(failure(() => lite.execute('CALL grafeo.total_triangles()'))).toMatchObject({
+      message: expect.stringMatching(/GRAFEO-Q004: .*algos/),
+      gqlStatus: '42000',
+    });
+    lite.free();
+  });
+
+  it('the full build runs the new graph procedures', () => {
+    const db = new Database();
+    db.execute(
+      "INSERT (:Person {name: 'Alix'})-[:KNOWS]->(:Person {name: 'Gus'})-[:KNOWS]->(:Person {name: 'Bo'})" +
+        "-[:KNOWS]->(:Person {name: 'Alix'})",
+    );
+    expect(db.execute('CALL grafeo.ktruss()')).toEqual([
+      { source: 0, target: 1, truss_number: 2 },
+      { source: 1, target: 2, truss_number: 2 },
+      { source: 2, target: 3, truss_number: 2 },
+    ]);
+    expect(db.execute('CALL grafeo.total_triangles()')).toEqual([{ total_triangles: 0 }]);
+    db.free();
   });
 });
 

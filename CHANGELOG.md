@@ -2,6 +2,80 @@
 
 All notable changes to `@grafeo-db/web`.
 
+## [0.6.2] - 2026-11-08
+
+Catches up on Grafeo Core 0.6.2. Databases persisted by 0.6.1 load unchanged. A correctness release: a string never equals a number, a null in a pattern finds nothing, an operand of the wrong kind raises `22G12` where 0.6.1 answered null, `importRdf()` now works in the full build, and the engine is a little larger. Some queries now fail or answer differently where 0.6.1 was wrong: see Changed.
+
+### Changed
+
+Queries and calls that ran in 0.6.1 and now fail or answer differently, all from Grafeo Core 0.6.2.
+
+- **A string and a number are never equal**: `'5' = 5` is false and `'5' <> 5` true, in GQL and Cypher, also in indexes, joins, `IN`, `MERGE` and upserts; `id(n) = '5'` finds nothing.
+- **Lists and records holding a null** can compare as unknown: `[null] = [null]` drops the row in a `WHERE`, and a value holding a null matches nothing in a join or a lookup. `DISTINCT`, grouping and `UNIQUE` still treat nulls as one value.
+- **Comparing two kinds with `<`, `<=`, `>`, `>=`**: GQL orders them as `ORDER BY` does (a string before every number), Cypher and Gremlin answer null, SQL/PGQ raises `22G04`.
+- **Wrong-kind operands raise `22G12`**: `true + 1`, `-'a'`, `[1, 2, 3][1.5]`, and in GQL `'x' + 3` in either order (it gave `'x3'`). A null operand still gives null.
+- **`CREATE INDEX` holds its label only**: a query on another label scans, with the same rows and a note in `EXPLAIN`. Existing indexes stay as they are, and `createPropertyIndex()` still covers every label.
+- **Transactions**: `START TRANSACTION`, `COMMIT` and `ROLLBACK` through `execute()` are refused — use `beginTransaction()`; `CREATE GRAPH ... AS COPY OF` is refused in a transaction.
+- **Procedure arguments** outside what an argument allows, or missing, raise `22023` naming the argument; procedures stop at the query timeout instead of answering partially.
+- **Edge weights**: the weighted algorithms refuse a value they cannot use, naming the edge and property (`22G12`, or `22023` for NaN, an infinity or a negative weight).
+- **`max_flow` and `min_cost_max_flow`** return one row per edge that carries flow, **`topological_sort`** on a cycle raises `22000` naming a cycle, and equal-weight spanning trees come back with the lowest edge ids.
+- **`INSERT` and single-node `MERGE` labels** containing `|`, `!`, `%` or parentheses are an error naming the statement.
+- **A negative `SKIP` or `LIMIT` after a GQL `CALL`** raises `22G02`.
+- **The memory limit is enforced**: WASM keeps the 768 MiB default, and a write that grows the store past it is refused with `GRAFEO-S001`, changes nothing, and the database and an open transaction stay usable.
+- **`DATETIME '...'` with an offset** is a ZONED DATETIME at that offset (`Z` is `+00:00`); 0.6.1 gave the UTC time without it.
+
+### Performance
+
+From Grafeo Core 0.6.2, by its measurements.
+
+- **Planner**: comma patterns pick their join order from sampled degrees, cycles close by lookup or intersection, and an equality on a property without an index reads its column directly.
+- **Constraints**: `UNIQUE` and `NODE KEY` build an index on their first property, so an insert under one no longer reads the whole label.
+- **Weighted algorithms** read each edge's weight directly instead of loading the whole edge; Dijkstra takes about a third fewer instructions.
+
+### WASM: larger
+
+From Grafeo Core 0.6.2, by its measurements.
+
+- `@grafeo-db/wasm` grows from 5.1 to 5.8 MB (about 2.0 MB gzipped) and `@grafeo-db/wasm-lite` from 3.3 to 3.9 MB (about 1.4 MB gzipped), mostly `importRdf` now in the full build.
+
+### Added
+
+From Grafeo Core 0.6.2.
+
+- **Query warnings on the raw result**: `executeRaw()` and the other raw calls return `warnings`, each a `QueryWarning` (`{ code, kind, message }`, `kind` a `deprecation` or a `notice`), ordered by code, empty when none. `execute()` returns rows only, so its warnings are not reported. Experimental: new warnings and kinds may come.
+- **Graph procedures**: `CALL grafeo.ktruss()`, `grafeo.total_triangles()` and `grafeo.subgraph_isomorphism(pattern_edges, pattern_nodes)` (full build).
+- **SQL/PGQ `||`** concatenates strings and lists.
+- **Lite runs the catalog procedures**: `CALL grafeo.labels()`, `grafeo.procedures()` and the like answer in `@grafeo-db/wasm-lite`; the CSV load procedures are refused there.
+- **`grafeo.pagerank` warns** (`01Y01`) when it runs out of iterations before its scores settle.
+- New type: `QueryWarning`.
+
+### Deprecated
+
+From Grafeo Core 0.6.2. They warn, and 0.7.0 refuses them.
+
+- **`ZONED DATETIME '...'` and `ZONED TIME '...'` literals** (`01X01`, `01X03`): write `DATETIME '...'` or `TIME '...'` with an offset.
+- **`+` on two lists** in GQL and SQL/PGQ (`01X02`): use `||`.
+
+### Fixed
+
+From Grafeo Core 0.6.2.
+
+- **`importRdf()` works in the full build**: the WASM `importRdf` is in every build with the RDF store, `@grafeo-db/wasm` included; the lite build still refuses it.
+- **Label expressions on a path's first node and in writes**: `MATCH (x IS A)-[:R]->(t)` now checks them, and `INSERT (n IS Person)` and `MERGE (n IS Person)` set those labels. Databases written by 0.6.1 may hold unlabelled nodes from such writes: find them with `MATCH (n) WHERE size(labels(n)) = 0 RETURN n`.
+- **A null in a property map** (`MATCH (n {k: NULL})`, also on an edge, in GQL, Cypher and SQL/PGQ) finds nothing; it found the elements without the key. A null in a `MERGE` pattern still matches an absent property.
+- **SPARQL**: a `.` after `FILTER`, `OPTIONAL`, `MINUS`, `GRAPH` or a nested group parses again (#737); a sub-select inside `GRAPH ?g` binds `?g` (#739); `BIND(EXISTS {...} AS ?v)` evaluates (#740); inside `GRAPH ?g { ... }`, `?g` binds only after the group (#738); and a variable repeated in one triple pattern holds the same term in each position.
+- **`UNIQUE`, `NODE KEY` and `MERGE`** treat `1`, `1.0e0` and the decimal `1.0`, and `[1]` and `[1.0]`, as one value; `UNIQUE` refuses `0.0` and `-0.0` as duplicates and counts every NaN, of either sign, as one.
+- **Filtered vector search on a quantized index** no longer returns fewer than `k` rows when the allowed nodes lie far from the query.
+- **Schema statements roll back with their transaction.**
+- **Booleans order false below true** in every plan, **lists compare element by element**, Cypher `+` joins a number and a string, grouping by a parameter works, `SKIP` and `LIMIT` after a GQL `CALL` take effect, and `YIELD` of a column the procedure does not have is refused when the call is planned.
+- **A graph cleared and written back keeps its size**, in a session and across reopens.
+
+### Upgrading
+
+- **The engine**: `@grafeo-db/wasm` and `@grafeo-db/wasm-lite` `0.6.2`, pinned to that exact version.
+- **Persisted databases carry over**: 0.6.2 still writes snapshot v5, and v4 and v5 snapshots of earlier releases load unchanged. As in 0.6.1, the lite build refuses a snapshot that holds RDF triples or text or vector indexes: it keeps it under `<key>__backup` and starts empty.
+- **Back to 0.6.1**: 0.6.1 opens the snapshots 0.6.2 writes with the same rows, but without the indexes a label-scoped `CREATE INDEX ... ON :Label(prop)` created. As in 0.6.1, 0.6.0 refuses a snapshot that holds a vector index created with a name (`CREATE VECTOR INDEX doc_emb ON :Doc(emb) ...`): it keeps it under `<key>__backup` and starts empty.
+
 ## [0.6.1] - 2026-11-02
 
 Catches up on Grafeo Core 0.6.1. Databases persisted by 0.6.0 load unchanged. New `detachDeleteNode()`, a `schema()` that describes the data's shape, and a faster engine in a slightly larger download. Some queries now fail where 0.6.0 answered with a wrong value: see Changed.

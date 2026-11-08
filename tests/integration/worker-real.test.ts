@@ -51,7 +51,7 @@ describe('worker entry on the real engine', () => {
     expect(answers.map((a) => a.id)).toEqual(ids);
     expect(answers.map((a) => a.error)).toEqual([undefined, undefined, undefined, undefined]);
     expect(answers[2].result).toEqual([{ 'a.name': 'Alix', 'b.name': 'Gus' }]);
-    expect(answers[3].result).toMatch(/^0\.6\.1($|-)/);
+    expect(answers[3].result).toMatch(/^0\.6\.2($|-)/);
     expect((await call('close')).error).toBeUndefined();
   });
 

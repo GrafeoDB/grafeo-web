@@ -30,7 +30,7 @@ npm install @grafeo-db/web
 
 ### Requirements
 
-- `@grafeo-db/web` versions in lockstep with [Grafeo](https://github.com/GrafeoDB/grafeo): 0.6.1 depends on exactly `@grafeo-db/wasm` and `@grafeo-db/wasm-lite` 0.6.1, installed with it. Do not add another version of either to your app.
+- `@grafeo-db/web` versions in lockstep with [Grafeo](https://github.com/GrafeoDB/grafeo): 0.6.2 depends on exactly `@grafeo-db/wasm` and `@grafeo-db/wasm-lite` 0.6.2, installed with it. Do not add another version of either to your app.
 - A browser with WebAssembly, ES modules in workers, and IndexedDB (see [Browser Support](#browser-support)).
 - A bundler that handles `.wasm` imports of ES modules (Vite with `vite-plugin-wasm`, webpack 5 with `experiments.asyncWebAssembly`, and the like): the engine packages are wasm-pack `bundler` builds.
 - Node.js 22 or later to build and test this package.
@@ -65,7 +65,7 @@ for (const row of result) {
 }
 
 // Check version
-console.log(GrafeoDB.version()); // e.g. "0.6.1"
+console.log(GrafeoDB.version()); // e.g. "0.6.2"
 
 // Cleanup
 await db.close();
@@ -224,6 +224,14 @@ const result = await db.execute(`MATCH (u:User) RETURN u.name`);
 ```
 
 Persistence triggers after every query execution (the debounce interval prevents excessive writes).
+
+### Upgrading from 0.6.1
+
+Databases that `@grafeo-db/web` 0.6.1 persisted load in 0.6.2 without any step on your side: the IndexedDB layout is unchanged and 0.6.2 still writes snapshot v5.
+
+- **A label-held index has no way back to 0.6.1**: `CREATE INDEX` now holds its label only, and 0.6.1 opens such a snapshot with the same rows but without those indexes. Other snapshots of 0.6.2 load in 0.6.1 unchanged.
+- **Some queries now fail or answer differently** where 0.6.1 answered with a wrong value: see Changed in the [CHANGELOG](CHANGELOG.md). A string never equals a number (`'5' = 5` is false), `{k: NULL}` in a pattern finds nothing, `'x' + 3` raises `22G12`, and `START TRANSACTION`, `COMMIT` and `ROLLBACK` through `execute()` are refused — use `beginTransaction()`.
+- **`importRdf()` works in the full build**: the WASM `importRdf` is in every build with the RDF store now, `@grafeo-db/wasm` included; the lite build still refuses it.
 
 ### Upgrading from 0.6.0
 
@@ -439,7 +447,7 @@ Requires WebAssembly, IndexedDB and Web Workers.
 | Constraint       | Limit                                             |
 | ---------------- | ------------------------------------------------- |
 | Database size    | ~500 MB (IndexedDB quota)                         |
-| Memory           | ~256 MB (WASM heap)                               |
+| Memory           | 768 MiB engine limit (the browser's memory is the real ceiling) |
 | Concurrency      | Single writer, multiple readers                   |
 | `changesSince()` | Throws: the WASM engine has no change tracking yet |
 

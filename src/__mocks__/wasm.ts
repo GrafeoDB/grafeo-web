@@ -2,7 +2,7 @@
  * Mock for @grafeo-db/wasm used in tests.
  *
  * Simulates a basic in-memory graph database with INSERT/MATCH support.
- * Matches the WASM 0.6.1 API surface.
+ * Matches the WASM 0.6.2 API surface.
  */
 
 interface Node {
@@ -84,15 +84,16 @@ export class Database {
     columns: string[];
     rows: unknown[][];
     executionTimeMs?: number;
+    warnings?: { code: string; kind: string; message: string }[];
   } {
     this.assertNotFreed();
     const results = this.execute(query);
     if (results.length === 0) {
-      return { columns: [], rows: [], executionTimeMs: 0.1 };
+      return { columns: [], rows: [], executionTimeMs: 0.1, warnings: [] };
     }
     const columns = Object.keys(results[0]);
     const rows = results.map((row) => columns.map((col) => row[col]));
-    return { columns, rows, executionTimeMs: 0.1 };
+    return { columns, rows, executionTimeMs: 0.1, warnings: [] };
   }
 
   executeWithLanguage(
@@ -483,13 +484,13 @@ export class Database {
       is_persistent: false,
       path: null,
       wal_enabled: false,
-      version: '0.6.1-mock',
+      version: '0.6.2-mock',
       features: ['gql'],
     };
   }
 
   static version(): string {
-    return '0.6.1-mock';
+    return '0.6.2-mock';
   }
 
   exportSnapshot(): Uint8Array {
