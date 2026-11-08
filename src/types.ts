@@ -111,11 +111,11 @@ export interface RawQueryResult {
   /** What the statement wrote; all zero for a read. */
   counters?: WriteCounters;
   /**
-   * What the statement raised, each `{ code, kind, message }`, ordered by code; empty when none.
+   * What the statement raised, each `{ code, kind, message }`, ordered by code; always present, empty when none.
    *
    * @experimental New in 0.6.2; new warnings and kinds may come.
    */
-  warnings?: QueryWarning[];
+  warnings: QueryWarning[];
   /**
    * The operator tree of a `PROFILE` statement, as data.
    *

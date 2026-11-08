@@ -84,7 +84,7 @@ export class Database {
     columns: string[];
     rows: unknown[][];
     executionTimeMs?: number;
-    warnings?: { code: string; kind: string; message: string }[];
+    warnings: { code: string; kind: string; message: string }[];
   } {
     this.assertNotFreed();
     const results = this.execute(query);
@@ -131,7 +131,12 @@ export class Database {
   executeRawWithLanguage(
     query: string,
     _language: string,
-  ): { columns: string[]; rows: unknown[][]; executionTimeMs?: number } {
+  ): {
+    columns: string[];
+    rows: unknown[][];
+    executionTimeMs?: number;
+    warnings: { code: string; kind: string; message: string }[];
+  } {
     this.assertNotFreed();
     return this.executeRaw(query);
   }
@@ -139,7 +144,12 @@ export class Database {
   executeRawWithParams(
     query: string,
     _params: object,
-  ): { columns: string[]; rows: unknown[][]; executionTimeMs?: number } {
+  ): {
+    columns: string[];
+    rows: unknown[][];
+    executionTimeMs?: number;
+    warnings: { code: string; kind: string; message: string }[];
+  } {
     this.assertNotFreed();
     return this.executeRaw(query);
   }
@@ -148,7 +158,12 @@ export class Database {
     query: string,
     _language: string,
     _params: object,
-  ): { columns: string[]; rows: unknown[][]; executionTimeMs?: number } {
+  ): {
+    columns: string[];
+    rows: unknown[][];
+    executionTimeMs?: number;
+    warnings: { code: string; kind: string; message: string }[];
+  } {
     this.assertNotFreed();
     return this.executeRaw(query);
   }

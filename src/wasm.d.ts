@@ -21,7 +21,7 @@ declare module '@grafeo-db/wasm' {
       columns: string[];
       rows: unknown[][];
       executionTimeMs?: number;
-      warnings?: { code: string; kind: string; message: string }[];
+      warnings: { code: string; kind: string; message: string }[];
     };
 
     /**
@@ -55,7 +55,7 @@ declare module '@grafeo-db/wasm' {
       columns: string[];
       rows: unknown[][];
       executionTimeMs?: number;
-      warnings?: { code: string; kind: string; message: string }[];
+      warnings: { code: string; kind: string; message: string }[];
     };
 
     /** Executes a GQL query with parameters and returns raw columns/rows (0.6). */
@@ -66,7 +66,7 @@ declare module '@grafeo-db/wasm' {
       columns: string[];
       rows: unknown[][];
       executionTimeMs?: number;
-      warnings?: { code: string; kind: string; message: string }[];
+      warnings: { code: string; kind: string; message: string }[];
     };
 
     /** Executes a query in a language with parameters and returns raw columns/rows (0.6). */
@@ -78,7 +78,7 @@ declare module '@grafeo-db/wasm' {
       columns: string[];
       rows: unknown[][];
       executionTimeMs?: number;
-      warnings?: { code: string; kind: string; message: string }[];
+      warnings: { code: string; kind: string; message: string }[];
     };
 
     /** Executes a Cypher query. Requires 'cypher' WASM feature. */
@@ -365,7 +365,7 @@ declare module '@grafeo-db/wasm-lite' {
       columns: string[];
       rows: unknown[][];
       executionTimeMs?: number;
-      warnings?: { code: string; kind: string; message: string }[];
+      warnings: { code: string; kind: string; message: string }[];
     };
     executeWithParams(
       query: string,
@@ -378,7 +378,7 @@ declare module '@grafeo-db/wasm-lite' {
       columns: string[];
       rows: unknown[][];
       executionTimeMs?: number;
-      warnings?: { code: string; kind: string; message: string }[];
+      warnings: { code: string; kind: string; message: string }[];
     };
     compact(): { checkpointed: boolean; versions_collected: number; rows_compressed: number; duration_ms: number };
     nodeCount(): number;

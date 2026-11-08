@@ -15,7 +15,7 @@ Queries and calls that ran in 0.6.1 and now fail or answer differently, all from
 - **Comparing two kinds with `<`, `<=`, `>`, `>=`**: GQL orders them as `ORDER BY` does (a string before every number), Cypher and Gremlin answer null, SQL/PGQ raises `22G04`.
 - **Wrong-kind operands raise `22G12`**: `true + 1`, `-'a'`, `[1, 2, 3][1.5]`, and in GQL `'x' + 3` in either order (it gave `'x3'`). A null operand still gives null.
 - **`CREATE INDEX` holds its label only**: a query on another label scans, with the same rows and a note in `EXPLAIN`. Existing indexes stay as they are, and `createPropertyIndex()` still covers every label.
-- **Transactions**: `START TRANSACTION`, `COMMIT` and `ROLLBACK` through `execute()` are refused — use `beginTransaction()`; `CREATE GRAPH ... AS COPY OF` is refused in a transaction.
+- **Transactions**: `START TRANSACTION`, `COMMIT` and `ROLLBACK` through `execute()` are refused — start one with `beginTransaction()` and end it with `commitTransaction()` or `rollbackTransaction()`; `CREATE GRAPH ... AS COPY OF` is refused in a transaction.
 - **Procedure arguments** outside what an argument allows, or missing, raise `22023` naming the argument; procedures stop at the query timeout instead of answering partially.
 - **Edge weights**: the weighted algorithms refuse a value they cannot use, naming the edge and property (`22G12`, or `22023` for NaN, an infinity or a negative weight).
 - **`max_flow` and `min_cost_max_flow`** return one row per edge that carries flow, **`topological_sort`** on a cycle raises `22000` naming a cycle, and equal-weight spanning trees come back with the lowest edge ids.

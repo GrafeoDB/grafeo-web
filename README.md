@@ -230,7 +230,7 @@ Persistence triggers after every query execution (the debounce interval prevents
 Databases that `@grafeo-db/web` 0.6.1 persisted load in 0.6.2 without any step on your side: the IndexedDB layout is unchanged and 0.6.2 still writes snapshot v5.
 
 - **A label-held index has no way back to 0.6.1**: `CREATE INDEX` now holds its label only, and 0.6.1 opens such a snapshot with the same rows but without those indexes. Other snapshots of 0.6.2 load in 0.6.1 unchanged.
-- **Some queries now fail or answer differently** where 0.6.1 answered with a wrong value: see Changed in the [CHANGELOG](CHANGELOG.md). A string never equals a number (`'5' = 5` is false), `{k: NULL}` in a pattern finds nothing, `'x' + 3` raises `22G12`, and `START TRANSACTION`, `COMMIT` and `ROLLBACK` through `execute()` are refused — use `beginTransaction()`.
+- **Some queries now fail or answer differently** where 0.6.1 answered with a wrong value: see Changed in the [CHANGELOG](CHANGELOG.md). A string never equals a number (`'5' = 5` is false), `{k: NULL}` in a pattern finds nothing, `'x' + 3` raises `22G12`, and `START TRANSACTION`, `COMMIT` and `ROLLBACK` through `execute()` are refused — start one with `beginTransaction()` and end it with `commitTransaction()` or `rollbackTransaction()`.
 - **`importRdf()` works in the full build**: the WASM `importRdf` is in every build with the RDF store now, `@grafeo-db/wasm` included; the lite build still refuses it.
 
 ### Upgrading from 0.6.0
@@ -447,7 +447,7 @@ Requires WebAssembly, IndexedDB and Web Workers.
 | Constraint       | Limit                                             |
 | ---------------- | ------------------------------------------------- |
 | Database size    | ~500 MB (IndexedDB quota)                         |
-| Memory           | 768 MiB engine limit (the browser's memory is the real ceiling) |
+| Memory           | 768 MiB engine limit: writes past it are refused with `GRAFEO-S001`; the browser may impose a lower ceiling |
 | Concurrency      | Single writer, multiple readers                   |
 | `changesSince()` | Throws: the WASM engine has no change tracking yet |
 
