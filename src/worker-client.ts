@@ -26,6 +26,8 @@ import type {
   CreateOptions,
   DatabaseInfo,
   DatabaseSnapshot,
+  EngineOptions,
+  ExecuteAsOfOptions,
   ExecuteOptions,
   ImportRowsOptions,
   LpgEdge,
@@ -51,6 +53,7 @@ import type {
   StorageStats,
   TextIndexOptions,
   TextSearchOptions,
+  TimePoint,
   UpsertEdgesOptions,
   UpsertNodesOptions,
   UpsertSummary,
@@ -67,6 +70,8 @@ export type {
   CreateOptions,
   DatabaseInfo,
   DatabaseSnapshot,
+  EngineOptions,
+  ExecuteAsOfOptions,
   ExecuteOptions,
   ImportRowsOptions,
   LpgEdge,
@@ -92,6 +97,7 @@ export type {
   StorageStats,
   TextIndexOptions,
   TextSearchOptions,
+  TimePoint,
   UpsertEdgesOptions,
   UpsertNodesOptions,
   UpsertSummary,
@@ -422,6 +428,29 @@ export class GrafeoDB {
   /** Returns true while a transaction is active. */
   async isTransactionActive(): Promise<boolean> {
     return this.open().isTransactionActive();
+  }
+
+  /**
+   * Runs a GQL query as the database was at `point` and returns its rows. A
+   * query that writes throws, and so does a point before the history the
+   * database keeps (`historyRetention`).
+   */
+  async executeAsOf<T extends Record<string, unknown> = Record<string, unknown>>(
+    query: string,
+    point: TimePoint,
+    options?: ExecuteAsOfOptions,
+  ): Promise<T[]> {
+    return (await this.open().executeAsOf(query, point, options)) as T[];
+  }
+
+  /** The epoch `point` reads at: the epoch itself, or the last commit at or before a time. */
+  async epochAsOf(point: TimePoint): Promise<bigint> {
+    return this.open().epochAsOf(point);
+  }
+
+  /** The epoch of the last commit. */
+  async currentEpoch(): Promise<bigint> {
+    return this.open().currentEpoch();
   }
 
   /** Exports a tamper-evident snapshot signed with `key`. */

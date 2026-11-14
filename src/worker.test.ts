@@ -883,3 +883,48 @@ describe('Worker message handler', () => {
     });
   });
 });
+
+describe('Worker engine options and time travel', () => {
+  afterEach(async () => {
+    vi.restoreAllMocks();
+    await send('close', [], 90);
+  });
+
+  it('opens the database with the engine options of init, and keeps them on clear and import', async () => {
+    const options = { memoryLimit: 1 << 26, pathSearchBudget: 1 << 20, historyRetention: 'forever' };
+    const construct = vi.spyOn(MockDatabase, 'importSnapshot');
+    expect((await send('init', [{ ...options }], 2)).result).toBe(true);
+    await send('execute', ["INSERT (:Person {name: 'Alix'})"], 3);
+    const before = (await send('currentEpoch', [], 4)).result as bigint;
+    await send('execute', ["INSERT (:Person {name: 'Gus'})"], 5);
+
+    const asOf = await send('executeAsOf', ['MATCH (p:Person) RETURN p.name', before], 6);
+    expect(asOf.error).toBeUndefined();
+    expect(asOf.result).toEqual([{ 'p.name': 'Alix' }]);
+    expect((await send('epochAsOf', [before + 5n], 7)).result).toBe(before + 1n);
+
+    const snapshot = (await send('export', [], 8)).result as { data: Uint8Array };
+    await send('import', [snapshot], 9);
+    expect(construct).toHaveBeenLastCalledWith(snapshot.data, options);
+    await send('clear', [], 10);
+    await send('execute', ["INSERT (:Person {name: 'Vincent'})"], 11);
+    expect((await send('executeAsOf', ['MATCH (p:Person) RETURN p.name', 1n], 12)).result).toEqual([
+      { 'p.name': 'Vincent' },
+    ]);
+  });
+
+  it('reports a refused engine option from init', async () => {
+    const res = await send('init', [{ memoryLimit: -1 }], 2);
+    expect(res.error).toBe('memoryLimit must be a positive whole number of bytes');
+  });
+
+  it('executeAsOf passes its parameters, and refuses a point before the history', async () => {
+    await send('init', [{}], 2);
+    const spy = vi.spyOn(MockDatabase.prototype, 'executeAsOf');
+    await send('executeAsOf', ['RETURN $x AS x', 0n, { params: { x: 1 } }], 3);
+    expect(spy).toHaveBeenCalledWith('RETURN $x AS x', 0n, { x: 1 });
+    await send('execute', ["INSERT (:Person {name: 'Alix'})"], 4);
+    const res = await send('executeAsOf', ['MATCH (p) RETURN p', 0n], 5);
+    expect(res.error).toMatch(/before the history/);
+  });
+});

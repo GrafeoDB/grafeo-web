@@ -2,7 +2,7 @@
  * Mock for @grafeo-db/wasm used in tests.
  *
  * Simulates a basic in-memory graph database with INSERT/MATCH support.
- * Matches the WASM 0.6.2 API surface.
+ * Matches the WASM 0.6.3 API surface.
  */
 
 interface Node {
@@ -41,7 +41,46 @@ function schemaProperties(elements: { properties: Record<string, unknown> }[]) {
   return [...types.keys()].sort().map((name) => ({ name, types: [...types.get(name)!].sort() }));
 }
 
+/** The settings of a mock database, checked as the engine checks them. */
+interface MockOptions {
+  memoryLimit?: number;
+  pathSearchBudget?: number;
+  historyRetention?: 'off' | 'forever' | number;
+}
+
+function checkOptions(options?: object | null): MockOptions {
+  if (options === undefined || options === null) return {};
+  const opts = options as Record<string, unknown>;
+  for (const key of ['memoryLimit', 'pathSearchBudget']) {
+    const value = opts[key];
+    if (value === undefined || value === null) continue;
+    if (typeof value !== 'number' || !Number.isSafeInteger(value) || value <= 0) {
+      throw new Error(`${key} must be a positive whole number of bytes`);
+    }
+  }
+  const retention = opts.historyRetention;
+  if (
+    retention !== undefined &&
+    retention !== 'off' &&
+    retention !== 'forever' &&
+    !(typeof retention === 'number' && Number.isFinite(retention) && retention >= 0)
+  ) {
+    throw new Error("historyRetention must be 'off', 'forever' or a number of milliseconds");
+  }
+  return opts as MockOptions;
+}
+
+function clone<T>(value: T): T {
+  return JSON.parse(JSON.stringify(value)) as T;
+}
+
 export class Database {
+  /** The options this database was opened with, for tests. */
+  readonly openOptions: MockOptions;
+  /** The epoch of the last commit: one per write outside a transaction, one per commit. */
+  private epoch = 0n;
+  /** The committed state at each epoch, kept when `historyRetention` is not `'off'`. */
+  private history = new Map<bigint, { nodes: Node[]; edges: Edge[] }>();
   private nodes: Node[] = [];
   private edges: Edge[] = [];
   private freed = false;
@@ -50,8 +89,86 @@ export class Database {
   private inTransaction = false;
   private txSnapshot: { nodes: Node[]; edges: Edge[] } | undefined = undefined;
 
-  constructor() {
-    // no-op
+  /** Set by `failNextOpen()`: the error the next constructor call throws. */
+  private static nextOpenError: Error | null = null;
+
+  /**
+   * Test seam: the next `new Database()` (and so the next `importSnapshot`)
+   * throws `error`, as the engine does when it cannot allocate a database.
+   */
+  static failNextOpen(error: Error): void {
+    Database.nextOpenError = error;
+  }
+
+  constructor(options?: object | null) {
+    const error = Database.nextOpenError;
+    if (error) {
+      Database.nextOpenError = null;
+      throw error;
+    }
+    this.openOptions = checkOptions(options);
+    this.recordEpoch();
+  }
+
+  private get keepsHistory(): boolean {
+    const retention = this.openOptions.historyRetention;
+    return retention !== undefined && retention !== 'off';
+  }
+
+  private recordEpoch(): void {
+    if (this.keepsHistory) {
+      this.history.set(this.epoch, clone({ nodes: this.nodes, edges: this.edges }));
+    }
+  }
+
+  /** A commit: the next epoch. */
+  private commitEpoch(): void {
+    this.epoch += 1n;
+    this.recordEpoch();
+  }
+
+  currentEpoch(): bigint {
+    this.assertNotFreed();
+    return this.epoch;
+  }
+
+  /** Mock: a `Date` or `{ ago }` reads at the current epoch. */
+  epochAsOf(point: unknown): bigint {
+    this.assertNotFreed();
+    let epoch: bigint;
+    if (typeof point === 'bigint') {
+      epoch = point > this.epoch ? this.epoch : point;
+    } else if (point instanceof Date || (typeof point === 'object' && point !== null && 'ago' in point)) {
+      epoch = this.epoch;
+    } else {
+      throw new TypeError('a point in time is a bigint epoch, a Date or { ago: milliseconds }');
+    }
+    if (epoch !== this.epoch && !this.history.has(epoch)) {
+      throw new Error(`epoch ${epoch} is before the history this database keeps`);
+    }
+    return epoch;
+  }
+
+  executeAsOf(query: string, point: unknown, params?: object): Record<string, unknown>[] {
+    const epoch = this.epochAsOf(point);
+    if (/^\s*(INSERT|CREATE|DELETE|MERGE|SET)\b/i.test(query)) {
+      throw new Error('a query at an earlier epoch is read-only');
+    }
+    const state =
+      this.history.get(epoch) ?? clone({ nodes: this.committedNodes, edges: this.committedEdges });
+    const view = new Database();
+    view.nodes = clone(state.nodes);
+    view.edges = clone(state.edges);
+    return params ? view.executeWithParams(query, params) : view.execute(query);
+  }
+
+  /** The committed nodes: inside a transaction, those before it. */
+  private get committedNodes(): Node[] {
+    return this.inTransaction && this.txSnapshot ? this.txSnapshot.nodes : this.nodes;
+  }
+
+  private get committedEdges(): Edge[] {
+    return this.inTransaction && this.txSnapshot ? this.txSnapshot.edges : this.edges;
   }
 
   private get liveNodes(): Node[] {
@@ -241,14 +358,18 @@ export class Database {
 
   memoryUsage(): object {
     this.assertNotFreed();
+    const limit = this.openOptions.memoryLimit ?? 768 * 1024 * 1024;
     return {
       total_bytes: 0,
+      limit_bytes: limit,
+      query_limit_bytes: limit,
       store: { total_bytes: 0 },
       indexes: { total_bytes: 0 },
       mvcc: { total_bytes: 0 },
       caches: { total_bytes: 0 },
       string_pool: { total_bytes: 0 },
-      buffer_manager: { total_bytes: 0 },
+      buffer_manager: { budget_bytes: limit, allocated_bytes: 0, hard_limit_bytes: limit },
+      spill: { total_bytes: 0 },
     };
   }
 
@@ -536,7 +657,7 @@ export class Database {
     return out;
   }
 
-  static importSnapshot(data: Uint8Array): Database {
+  static importSnapshot(data: Uint8Array, options?: object | null): Database {
     const header = new TextDecoder().decode(data.slice(0, 4));
     if (header === 'GSN1') {
       throw new Error(
@@ -546,13 +667,15 @@ export class Database {
     }
     const json = new TextDecoder().decode(data);
     const parsed = JSON.parse(json) as { nodes: Node[]; edges: Edge[] };
-    const db = new Database();
+    const db = new Database(options);
     db.nodes = parsed.nodes;
     db.edges = parsed.edges;
+    db.history.clear();
+    db.recordEpoch();
     return db;
   }
 
-  static importSnapshotSigned(data: Uint8Array, key: Uint8Array): Database {
+  static importSnapshotSigned(data: Uint8Array, key: Uint8Array, options?: object | null): Database {
     if (key.length === 0) {
       throw new Error('importSnapshotSigned: key must not be empty');
     }
@@ -573,7 +696,7 @@ export class Database {
       }
     }
     const payload = data.slice(4, data.length - 32);
-    return Database.importSnapshot(payload);
+    return Database.importSnapshot(payload, options);
   }
 
   beginTransaction(): void {
@@ -595,6 +718,7 @@ export class Database {
     }
     this.inTransaction = false;
     this.txSnapshot = undefined;
+    this.commitEpoch();
   }
 
   rollbackTransaction(): void {
@@ -668,6 +792,7 @@ export class Database {
       }
     }
 
+    if (!this.inTransaction) this.commitEpoch();
     return [];
   }
 

@@ -14,8 +14,52 @@ export type QueryLanguage =
   | 'sql'
   | 'sql-pgq';
 
+/**
+ * Engine settings the database opens with. They hold for the whole life of
+ * the database: a persisted database reopens with the settings given to
+ * `create()`, never with those of the session that saved it, and `clear()`,
+ * `import()` and `signedImport()` keep them. The engine checks them: a value
+ * it refuses makes `create()` throw and leaves a persisted database as it is.
+ */
+export interface EngineOptions {
+  /**
+   * How many bytes the database may hold, a positive whole number (768 MiB by
+   * default). A write past it throws `GRAFEO-S001` and changes nothing; reads
+   * keep working. A database opened above it reads, and refuses writes that
+   * need memory.
+   */
+  memoryLimit?: number;
+  /**
+   * How many bytes one path search may hold, a positive whole number: the
+   * paths a variable-length or shortest-path search keeps at once, or what an
+   * RDF property path search visits. A quarter of `memoryLimit` by default,
+   * at most 256 MiB, never more than `memoryLimit`. A search over it throws
+   * `GRAFEO-S001`. Needs Grafeo 0.6.3 or later.
+   */
+  pathSearchBudget?: number;
+  /**
+   * How much history the database keeps for `executeAsOf()` and
+   * `epochAsOf()`: `'off'` (the default), `'forever'` or a number of
+   * milliseconds. History is held in memory only: a reload, `import()` or
+   * `clear()` starts without it.
+   */
+  historyRetention?: 'off' | 'forever' | number;
+}
+
+/**
+ * A point in the database's history: an epoch (a `bigint`, as
+ * `currentEpoch()` returns it), a `Date`, or `{ ago }` milliseconds before now.
+ */
+export type TimePoint = bigint | Date | { ago: number };
+
+/** Options for `executeAsOf()`. */
+export interface ExecuteAsOfOptions {
+  /** Named parameters to bind into the query. */
+  params?: Record<string, unknown>;
+}
+
 /** Options for creating a GrafeoDB instance. */
-export interface CreateOptions {
+export interface CreateOptions extends EngineOptions {
   /** IndexedDB key for persistent storage. Omit for in-memory only. */
   persist?: string;
   /** Run WASM execution in a dedicated Web Worker. Pass `true` for auto-creation, or a pre-created Worker instance for bundler-friendly usage. */
@@ -27,7 +71,7 @@ export interface CreateOptions {
 }
 
 /** Options for creating a GrafeoDB lite instance (no worker support). */
-export interface LiteCreateOptions {
+export interface LiteCreateOptions extends EngineOptions {
   /** IndexedDB key for persistent storage. Omit for in-memory only. */
   persist?: string;
   /** Debounce interval (ms) for IndexedDB writes. Default: 1000. */
@@ -341,12 +385,23 @@ export interface DatabaseInfo {
 /** Hierarchical memory usage breakdown. */
 export interface MemoryUsage {
   total_bytes: number;
-  store: { total_bytes: number };
-  indexes: { total_bytes: number };
-  mvcc: { total_bytes: number };
-  caches: { total_bytes: number };
-  string_pool: { total_bytes: number };
-  buffer_manager: { total_bytes: number };
+  /** The memory limit (`memoryLimit`), in bytes. */
+  limit_bytes: number;
+  /** What one statement may hold, in bytes; WebAssembly builds do not enforce it. */
+  query_limit_bytes: number;
+  store: { total_bytes: number; [key: string]: unknown };
+  indexes: { total_bytes: number; [key: string]: unknown };
+  mvcc: { total_bytes: number; [key: string]: unknown };
+  /** The plan cache; Grafeo 0.6.3 adds `plan_cache_limit_bytes`. */
+  caches: { total_bytes: number; [key: string]: unknown };
+  string_pool: { total_bytes: number; [key: string]: unknown };
+  buffer_manager: { budget_bytes: number; allocated_bytes: number; hard_limit_bytes: number; [key: string]: unknown };
+  /** RDF triples and terms; present when the database holds any. */
+  rdf?: { total_bytes: number; [key: string]: unknown };
+  /** Change data capture; present when it holds anything. */
+  cdc?: { total_bytes: number; [key: string]: unknown };
+  /** Always zero in WebAssembly builds, which do not spill. */
+  spill: { total_bytes: number; [key: string]: unknown };
   [key: string]: unknown;
 }
 

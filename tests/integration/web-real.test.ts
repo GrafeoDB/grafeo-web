@@ -490,3 +490,60 @@ describe('GrafeoDB lite on real wasm-lite', () => {
     await target.close();
   });
 });
+
+// snapshot-v5-wasm-0.6.2.bin was exported by @grafeo-db/wasm 0.6.2 after:
+//   INSERT (:Person {name: 'Alix', age: 30})-[:KNOWS {since: 2020}]->(:Person {name: 'Gus', age: 25})
+//   INSERT (:City {name: 'Utrecht', tags: ['a','b'], score: 1.5, ok: true, price: 2.50})
+//   CREATE INDEX person_name FOR (p:Person) ON (p.name)          (held by its label since 0.6.2)
+//   INSERT (:Doc {title: 'graphs', body: 'graph databases in the browser', emb: vector([1.0, 0.0, 0.0])})
+//   INSERT (:Doc {title: 'cooking', body: 'a recipe for soup', emb: vector([0.0, 1.0, 0.0])})
+//   db.createTextIndex('Doc', 'body', { tokenizer: 'standard', k1: 1.5 })
+//   CREATE VECTOR INDEX doc_emb ON :Doc(emb) DIMENSION 3 METRIC 'cosine'
+//   INSERT DATA { <http://ex/a> <http://ex/knows> <http://ex/b> }                    (SPARQL)
+//   INSERT DATA { GRAPH <http://ex/g> { <http://ex/b> <http://ex/knows> <http://ex/c> } }
+// snapshot-v5-wasm-lite-0.6.2.bin by @grafeo-db/wasm-lite 0.6.2 after the first three.
+describe('upgrade: databases persisted by @grafeo-db/web 0.6.2', () => {
+  const iri = (value: string) => ({ termType: 'NamedNode', value });
+
+  it('full: opens a 0.6.2 database with its label index, named vector index, text index and named graph', async () => {
+    const key = 'it-upgrade-062';
+    await persistAs0544(key, await fixture('snapshot-v5-wasm-0.6.2.bin'));
+
+    const db = await GrafeoDB.create({ persist: key, persistInterval: 10 });
+    expect(await db.nodeCount()).toBe(5);
+    const indexes = await db.execute('SHOW INDEXES');
+    expect(indexes).toContainEqual({ name: 'person_name', type: 'Hash', label: 'Person', property: 'name' });
+    expect(indexes).toContainEqual(expect.objectContaining({ name: 'doc_emb', type: 'Vector', label: 'Doc' }));
+    expect((await db.execute("EXPLAIN MATCH (p:Person {name: 'Gus'}) RETURN p"))[0].plan).toContain('[index: name]');
+    expect((await db.textSearch('Doc', 'body', 'graph', 2)).map((r) => r.id)).toEqual([3]);
+    expect((await db.vectorSearch('Doc', 'emb', new Float32Array([1, 0, 0]), 1)).map((r) => r.id)).toEqual([3]);
+    expect(await db.execute('SELECT ?s ?o WHERE { ?s <http://ex/knows> ?o }', { language: 'sparql' })).toEqual([
+      { s: iri('http://ex/a'), o: iri('http://ex/b') },
+    ]);
+    expect(
+      await db.execute('SELECT ?s ?o WHERE { GRAPH <http://ex/g> { ?s <http://ex/knows> ?o } }', { language: 'sparql' }),
+    ).toEqual([{ s: iri('http://ex/b'), o: iri('http://ex/c') }]);
+
+    await db.execute("INSERT (:Person {name: 'Vincent', age: 41})");
+    await db.close();
+    const reopened = await GrafeoDB.create({ persist: key });
+    expect(await reopened.nodeCount()).toBe(6);
+    expect(await reopened.execute('SHOW INDEXES')).toContainEqual(expect.objectContaining({ name: 'doc_emb' }));
+    expect(await storedSnapshot(`${key}__backup`)).toBeNull();
+    await reopened.clear();
+    await reopened.close();
+  });
+
+  it('lite: opens a database written by the 0.6.2 lite build', async () => {
+    const key = 'it-upgrade-lite-062';
+    await persistAs0544(key, await fixture('snapshot-v5-wasm-lite-0.6.2.bin'));
+    const db = await GrafeoDBLite.create({ persist: key });
+    expect(await db.nodeCount()).toBe(3);
+    expect(await db.execute('SHOW INDEXES')).toEqual([
+      { name: 'person_name', type: 'Hash', label: 'Person', property: 'name' },
+    ]);
+    expect(await db.execute('MATCH (c:City) RETURN c.price')).toEqual([{ 'c.price': { $decimal: '2.50' } }]);
+    await db.clear();
+    await db.close();
+  });
+});
