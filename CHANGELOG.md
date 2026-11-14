@@ -2,6 +2,8 @@
 
 All notable changes to `@grafeo-db/web`.
 
+## [0.6.3] - 2026-11-15
+
 ## [0.6.2] - 2026-11-08
 
 Catches up on Grafeo Core 0.6.2. Databases persisted by 0.6.1 load unchanged. A correctness release: a string never equals a number, a null in a pattern finds nothing, an operand of the wrong kind raises `22G12` where 0.6.1 answered null, `importRdf()` now works in the full build, and the engine is a little larger. Some queries now fail or answer differently where 0.6.1 was wrong: see Changed.
