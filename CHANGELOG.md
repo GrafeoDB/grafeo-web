@@ -19,7 +19,7 @@ Queries that ran in 0.6.2 and now fail or behave differently, all from Grafeo Co
 - **A path search over its budget fails with `GRAFEO-S001`**: a variable-length or shortest-path search, or a SPARQL property path, that holds more than `pathSearchBudget` (by default a quarter of `memoryLimit`, at most 256 MiB, so 192 MiB) names the budget and its setting; it was `GRAFEO-Q006`.
 - **SPARQL graph operations run inside a transaction**: after `beginTransaction()`, `CREATE`, `DROP`, `CLEAR`, `COPY`, `MOVE` and `ADD` apply at the commit with the transaction's triple updates, and its later statements see them; 0.6.2 refused any SPARQL statement after one with `GRAFEO-T004`.
 - **A standalone type a graph type lists stays in force** ([#764](https://github.com/GrafeoDB/grafeo/issues/764)): a type made with `CREATE NODE TYPE` or `CREATE EDGE TYPE` keeps applying by its label in every graph once a graph type lists it, which reverses 0.6.2 for this case; `DROP NODE TYPE` of it is refused while a graph type lists it.
-- **The plan cache is bounded in bytes**: it holds plans up to a sixty-fourth of `memoryLimit` (12 MiB by default, at least 4 MiB, at most 64 MiB) where it held 1,000 plans whatever their size, and a plan larger than that runs uncached.
+- **The plan cache is bounded in bytes**: it holds plans up to a sixty-fourth of `memoryLimit` (12 MiB by default; at least 4 MiB and at most 64 MiB, never more than `memoryLimit`) where it held 1,000 plans whatever their size, and a plan larger than that runs uncached. `memoryUsage().caches.plan_cache_limit_bytes` reports the bound.
 - **RDF data counts in full against the memory limit**: the text of every IRI, literal and blank node is counted and a term repeated across triples is held once, so `memoryUsage().rdf` rises to what the store holds and an RDF database near `memoryLimit` reaches it sooner.
 
 ### Fixed
@@ -39,6 +39,7 @@ From Grafeo Core 0.6.3, except the last entry.
 - **The engine**: `@grafeo-db/wasm` and `@grafeo-db/wasm-lite` `0.6.3`, pinned to that exact version.
 - **Persisted databases carry over**: 0.6.3 still writes snapshot v5, and the snapshots of 0.5.x and 0.6.x releases load unchanged.
 - **No per-query memory limit in WebAssembly**: Grafeo Core 0.6.3 caps what one statement holds in the builds that spill to disk, and the WebAssembly builds do not spill, so a large sort or grouping is bound only by `memoryLimit`.
+- **Back to 0.6.2**: 0.6.2 opens the snapshots 0.6.3 writes with the same rows and indexes, except one that holds a standalone node or edge type a graph type lists ([#764](https://github.com/GrafeoDB/grafeo/issues/764)): 0.6.2 refuses it (`GRAFEO-X002`), keeps it under `<key>__backup` and starts empty.
 
 ## [0.6.2] - 2026-11-08
 

@@ -256,7 +256,7 @@ Persistence triggers after every query execution (the debounce interval prevents
 
 ### Upgrading
 
-Databases persisted by `@grafeo-db/web` 0.5 and later load without any step on your side; the query changes per release are in the [CHANGELOG](CHANGELOG.md) and Grafeo's [Upgrading to 0.6](https://docs.grafeo.dev/get-started/upgrading/0.6/). A saved database has no way back: 0.5.x cannot read the v5 snapshots 0.6 writes (export with `db.export()` first if a downgrade may be needed), 0.6.0 refuses a snapshot with a named vector index, and 0.6.1 opens a 0.6.2 snapshot without the indexes `CREATE INDEX` holds on a label. A refused snapshot (from a newer Grafeo, or with data the lite build cannot keep) is kept under `<key>__backup` and the database starts empty; open that key with the full build to export it.
+Databases persisted by `@grafeo-db/web` 0.5 and later load without any step on your side; the query changes per release are in the [CHANGELOG](CHANGELOG.md) and Grafeo's [Upgrading to 0.6](https://docs.grafeo.dev/get-started/upgrading/0.6/). A saved database has no way back: 0.5.x cannot read the v5 snapshots 0.6 writes (export with `db.export()` first if a downgrade may be needed), 0.6.0 refuses a snapshot with a named vector index, 0.6.1 opens a 0.6.2 snapshot without the indexes `CREATE INDEX` holds on a label, and 0.6.2 refuses a 0.6.3 snapshot that holds a standalone type a graph type lists. A refused snapshot (from a newer Grafeo, or with data the lite build cannot keep) is kept under `<key>__backup` and the database starts empty; open that key with the full build to export it.
 
 ### Storage Management
 
