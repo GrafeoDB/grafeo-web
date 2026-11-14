@@ -225,38 +225,9 @@ const result = await db.execute(`MATCH (u:User) RETURN u.name`);
 
 Persistence triggers after every query execution (the debounce interval prevents excessive writes).
 
-### Upgrading from 0.6.1
+### Upgrading
 
-Databases that `@grafeo-db/web` 0.6.1 persisted load in 0.6.2 without any step on your side: the IndexedDB layout is unchanged and 0.6.2 still writes snapshot v5.
-
-- **A label-held index has no way back to 0.6.1**: `CREATE INDEX` now holds its label only, and 0.6.1 opens such a snapshot with the same rows but without those indexes. Other snapshots of 0.6.2 load in 0.6.1 unchanged.
-- **Some queries now fail or answer differently** where 0.6.1 answered with a wrong value: see Changed in the [CHANGELOG](CHANGELOG.md). A string never equals a number (`'5' = 5` is false), `{k: NULL}` in a pattern finds nothing, `'x' + 3` raises `22G12`, and `START TRANSACTION`, `COMMIT` and `ROLLBACK` through `execute()` are refused — start one with `beginTransaction()` and end it with `commitTransaction()` or `rollbackTransaction()`.
-- **`importRdf()` works in the full build**: the WASM `importRdf` is in every build with the RDF store now, `@grafeo-db/wasm` included; the lite build still refuses it.
-
-### Upgrading from 0.6.0
-
-Databases that `@grafeo-db/web` 0.6.0 persisted load in 0.6.1 without any step on your side: the IndexedDB layout and the snapshot format (v5) are unchanged.
-
-- **A named vector index has no way back to 0.6.0**: 0.6.0 refuses a snapshot that holds a vector index created with a name (`CREATE VECTOR INDEX doc_emb ON :Doc(emb) ...`), keeps it under `<key>__backup` and starts empty. Other snapshots of 0.6.1, those with an index from `createVectorIndex()` included, still load in 0.6.0.
-- **Some queries now fail** where 0.6.0 answered with a wrong value: see Changed in the [CHANGELOG](CHANGELOG.md). A `CAST` of text that is no number fails with `22018`, a GQL `{3,1}` is a syntax error, an undeclared SPARQL prefix (other than `rdf`, `rdfs`, `xsd`, `owl` and `fn`) too, and `SERIALIZABLE` is refused with `GRAFEO-Q004`.
-- **`COMMIT`, `ROLLBACK` and `START TRANSACTION` fail with `25000` inside `beginTransaction()`**: end it with `commitTransaction()` or `rollbackTransaction()`.
-
-### Upgrading from 0.5
-
-Databases that `@grafeo-db/web` 0.5.x persisted load in 0.6 without any step on your side: the IndexedDB layout is unchanged, and Grafeo 0.6 still reads the v4 snapshots 0.5.x stored. The first save after the upgrade writes the format of Grafeo 0.6.0 (snapshot v5, which also keeps index and constraint names and text and vector index options).
-
-- **No way back to 0.5.x for a saved database**: 0.5.x cannot read a v5 snapshot. Export first (`db.export()`) if you may need to downgrade.
-- **Property indexes keep working but lose their name**: v4 never stored index names, so an index from 0.5.x is used by queries but not listed by `SHOW INDEXES`. Create it again under a name if you need it listed.
-- **A snapshot the engine refuses is kept, not deleted**: `create({ persist: 'my-app' })` logs a warning naming the snapshot format and the engine version, keeps the snapshot under the key `my-app__backup`, and starts with an empty database. This happens with a snapshot from a newer Grafeo, and in the lite build with a snapshot that holds data the lite build cannot keep (RDF triples, text or vector indexes; 0.5.x dropped such data silently, 0.6 refuses it). Read the backup with the full build:
-
-```typescript
-import { GrafeoDB } from '@grafeo-db/web';
-
-const rescue = await GrafeoDB.create({ persist: 'my-app__backup' });
-const snapshot = await rescue.export();
-```
-
-- **Query results changed in Grafeo 0.6**: a lone `INSERT` returns no rows; GQL sorts nulls last (`ORDER BY x DESC` too); a number with a point is an exact decimal in GQL and SQL/PGQ (`{ $decimal: '1.50' }` in results and parameters); integer overflow and division by zero fail the query; a statement nests at most 64 levels and a property value 128; error messages start with their code (`GRAFEO-Q001: ...`); SPARQL returns RDF/JS terms (`{ termType: 'NamedNode', value: 'http://ex/a' }`, read `.value` for the old string) and `ASK` returns `[{ boolean: true }]`; `importRows()` and `importLpg()` write nothing when a row fails. See the [CHANGELOG](CHANGELOG.md) and Grafeo's [Upgrading to 0.6](https://grafeo.dev/upgrading/0.6/).
+Databases persisted by `@grafeo-db/web` 0.5 and later load without any step on your side; the query changes per release are in the [CHANGELOG](CHANGELOG.md) and Grafeo's [Upgrading to 0.6](https://docs.grafeo.dev/get-started/upgrading/0.6/). A saved database has no way back: 0.5.x cannot read the v5 snapshots 0.6 writes (export with `db.export()` first if a downgrade may be needed), 0.6.0 refuses a snapshot with a named vector index, and 0.6.1 opens a 0.6.2 snapshot without the indexes `CREATE INDEX` holds on a label. A refused snapshot (from a newer Grafeo, or with data the lite build cannot keep) is kept under `<key>__backup` and the database starts empty; open that key with the full build to export it.
 
 ### Storage Management
 
@@ -516,7 +487,7 @@ If you see errors like "Failed to construct Worker" or "Module not found":
 - **Vite**: Worker URLs via `import.meta.url` work out of the box.
 - **Webpack 5**: Ensure `new Worker(new URL(...))` syntax is used. Webpack detects this pattern and bundles the worker entry.
 - **Next.js**: Use the pre-created Worker approach shown above. Dynamic `import.meta.url` does not work in Next.js server components.
-- **Create React App**: CRA (Webpack 4) does not support the `new URL(...)` pattern. Use `worker: new Worker(...)` with a manually configured worker URL.
+- **Create React App**: CRA is no longer maintained and its webpack 4 does not support the `new URL(...)` pattern. Move the app to Vite (with `vite-plugin-wasm`, see [Requirements](#requirements)).
 
 ## Development
 
@@ -529,10 +500,10 @@ npm run typecheck         # Type check (tsc --noEmit)
 
 ## Related
 
-| Package                                                  | Use Case        |
-| -------------------------------------------------------- | --------------- |
-| [`grafeo`](https://crates.io/crates/grafeo)              | Rust crate      |
-| [`@grafeo-db/wasm`](https://github.com/GrafeoDB/grafeo)  | Raw WASM binary |
+| Package                                                            | Use Case        |
+| ------------------------------------------------------------------ | --------------- |
+| [`grafeo`](https://crates.io/crates/grafeo)                        | Rust crate      |
+| [`@grafeo-db/wasm`](https://www.npmjs.com/package/@grafeo-db/wasm) | Raw WASM binary |
 
 ## License
 
