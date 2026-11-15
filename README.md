@@ -131,7 +131,7 @@ Parameters work with all query languages, with `execute()` and `executeRaw()`, a
 
 #### Time Travel
 
-Reads of an earlier state need `historyRetention` in `create()`; history is kept in memory only, so a reload, `import()` or `clear()` starts without it, and a read before that point is refused (`GRAFEO-V001`).
+Reads of an earlier state need `historyRetention` in `create()`. History is kept in memory only. A reload, `import()` or `signedImport()` continues at the snapshot's epoch, and a read before it fails with `GRAFEO-V001`. `clear()` starts again at epoch 0, so an epoch number from before the clear reads the new, empty database; a `Date` from before it fails with `GRAFEO-V001`.
 
 | Method                                    | Description                                                                 |
 | ----------------------------------------- | --------------------------------------------------------------------------- |
