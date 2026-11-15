@@ -9,7 +9,7 @@ Engine settings release: `create()` takes `memoryLimit`, `pathSearchBudget` and 
 ### Added
 
 - **Engine settings in `create()`**: `memoryLimit`, `pathSearchBudget` and `historyRetention` set the bytes the database may hold, the bytes one path search may hold and the history kept for time travel, in direct, worker, worker-client and lite mode. They hold for the database's whole life (a reload from IndexedDB, `clear()`, `import()` and `signedImport()` included), and a value the engine refuses makes `create()` throw and leaves the persisted database as it is.
-- **Time travel**: `executeAsOf(query, point, { params })` runs a GQL read as the database was at a point (an epoch `bigint`, a `Date` or `{ ago }`), `epochAsOf(point)` gives the epoch a point reads at, and `currentEpoch()` the epoch of the last commit. History is held in memory only, so a reload, `import()` or `clear()` starts without it.
+- **Time travel**: `executeAsOf(query, point, { params })` runs a GQL read as the database was at a point (an epoch `bigint`, a `Date` or `{ ago }`), `epochAsOf(point)` gives the epoch a point reads at, and `currentEpoch()` the epoch of the last commit. History is held in memory only: a reload, `import()` or `signedImport()` continues at the snapshot's epoch and refuses a read before it (`GRAFEO-V001`), and `clear()` starts again at epoch 0.
 - **New types**: `EngineOptions`, `TimePoint` and `ExecuteAsOfOptions`.
 
 ### Changed
