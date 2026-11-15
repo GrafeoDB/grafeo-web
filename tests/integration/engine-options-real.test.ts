@@ -26,14 +26,11 @@ function engineAtLeast(version: string): boolean {
   }
   return true;
 }
-/** `pathSearchBudget` is new in Grafeo 0.6.3; an older engine ignores the key. */
-const hasPathSearchBudget = engineAtLeast('0.6.3');
 /**
  * The engine release whose snapshot import sets the history floor at the
  * import's epoch (grafeo inbox, transactions.md: "A read before a snapshot
  * import's epoch answers with the imported data"). 0.6.2 answers such a read
- * with the imported data. Proposed for 0.6.3; move it to the release that
- * takes the fix.
+ * with the imported data; 0.6.3 refuses it.
  */
 const HISTORY_FLOOR_AT_IMPORT = '0.6.3';
 
@@ -169,7 +166,9 @@ describe.each([
       expect(await imported.executeAsOf('MATCH (p:P) RETURN count(p) AS c', await imported.currentEpoch())).toEqual([
         { c: 3 },
       ]);
-      await expect(imported.executeAsOf('MATCH (p:P) RETURN count(p) AS c', 1n)).rejects.toThrow(/not retained/);
+      await expect(imported.executeAsOf('MATCH (p:P) RETURN count(p) AS c', 1n)).rejects.toThrow(
+        /^GRAFEO-V001: .*not retained/,
+      );
       await imported.close();
 
       const key = `it-history-floor-${name}`;
@@ -177,7 +176,9 @@ describe.each([
       await persisted.import(snapshot);
       await persisted.close();
       const reloaded = await Db.create({ persist: key, historyRetention: 'forever' });
-      await expect(reloaded.executeAsOf('MATCH (p:P) RETURN count(p) AS c', 1n)).rejects.toThrow(/not retained/);
+      await expect(reloaded.executeAsOf('MATCH (p:P) RETURN count(p) AS c', 1n)).rejects.toThrow(
+        /^GRAFEO-V001: .*not retained/,
+      );
       await reloaded.clear();
       await reloaded.close();
     },
@@ -192,7 +193,7 @@ describe.each([
     await db.close();
   });
 
-  it.skipIf(!hasPathSearchBudget)('pathSearchBudget bounds a path search, also after a reload', async () => {
+  it('pathSearchBudget bounds a path search, also after a reload', async () => {
     const key = `it-path-budget-${name}`;
     const db = await Db.create({ persist: key, persistInterval: 10 });
     await db.execute('INSERT (:N {i: 0})-[:R]->(:N {i: 1})-[:R]->(:N {i: 2})-[:R]->(:N {i: 3})');
