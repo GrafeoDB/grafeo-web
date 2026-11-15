@@ -2,14 +2,18 @@
  * Type declarations for @grafeo-db/wasm and @grafeo-db/wasm-lite.
  *
  * These mirror the wasm-bindgen generated types of the WASM crate
- * (0.6.2), with the result shapes the generated `any` leaves out.
+ * (0.6.3), with the result shapes the generated `any` leaves out.
  * The lite variant leaves out the other query languages and the AI search
  * features at the WASM level.
  */
 declare module '@grafeo-db/wasm' {
   export class Database {
-    /** Creates a new in-memory database. */
-    constructor();
+    /**
+     * Creates a new in-memory database. `options` (0.6.2): `memoryLimit`,
+     * `historyRetention`, and (0.6.3) `pathSearchBudget`; an older build
+     * ignores a key it does not know.
+     */
+    constructor(options?: import('./types').EngineOptions);
 
     /** Executes a GQL query and returns results as an array of objects. */
     execute(query: string): Record<string, unknown>[];
@@ -293,16 +297,16 @@ declare module '@grafeo-db/wasm' {
      */
     exportSnapshotSigned(key: Uint8Array): Uint8Array;
 
-    /** Creates a database from an unsigned binary snapshot. */
-    static importSnapshot(data: Uint8Array): Database;
+    /** Creates a database from an unsigned binary snapshot, opened with the constructor's `options`. */
+    static importSnapshot(data: Uint8Array, options?: import('./types').EngineOptions): Database;
 
     /**
      * Creates a database from a signed snapshot produced by
      * `exportSnapshotSigned()`. Verifies the HMAC tag in constant time; throws
      * if the data is truncated, signed with a different key, or missing the
-     * `GSN1` header.
+     * `GSN1` header. Opens with the constructor's `options`.
      */
-    static importSnapshotSigned(data: Uint8Array, key: Uint8Array): Database;
+    static importSnapshotSigned(data: Uint8Array, key: Uint8Array, options?: import('./types').EngineOptions): Database;
 
     /**
      * Begins a new transaction. Subsequent `execute*` calls see each other's
@@ -319,6 +323,18 @@ declare module '@grafeo-db/wasm' {
 
     /** Returns `true` while a transaction is active. */
     isTransactionActive(): boolean;
+
+    /**
+     * Runs one GQL query, with optional parameters, as the database was at
+     * a point (a `bigint` epoch, a `Date` or `{ ago }`). A query that writes throws.
+     */
+    executeAsOf(query: string, point: unknown, params?: object): Record<string, unknown>[];
+
+    /** The epoch a point reads at, as a `bigint`. */
+    epochAsOf(point: unknown): bigint;
+
+    /** The epoch of the last commit, as a `bigint`. */
+    currentEpoch(): bigint;
 
     /**
      * Closes the database: rolls back any active transaction, clears the plan
@@ -359,7 +375,7 @@ declare module '@grafeo-db/wasm' {
  */
 declare module '@grafeo-db/wasm-lite' {
   export class Database {
-    constructor();
+    constructor(options?: import('./types').EngineOptions);
     execute(query: string): Record<string, unknown>[];
     executeRaw(query: string): {
       columns: string[];
@@ -403,12 +419,15 @@ declare module '@grafeo-db/wasm-lite' {
     static version(): string;
     exportSnapshot(): Uint8Array;
     exportSnapshotSigned(key: Uint8Array): Uint8Array;
-    static importSnapshot(data: Uint8Array): Database;
-    static importSnapshotSigned(data: Uint8Array, key: Uint8Array): Database;
+    static importSnapshot(data: Uint8Array, options?: import('./types').EngineOptions): Database;
+    static importSnapshotSigned(data: Uint8Array, key: Uint8Array, options?: import('./types').EngineOptions): Database;
     beginTransaction(): void;
     commitTransaction(): void;
     rollbackTransaction(): void;
     isTransactionActive(): boolean;
+    executeAsOf(query: string, point: unknown, params?: object): Record<string, unknown>[];
+    epochAsOf(point: unknown): bigint;
+    currentEpoch(): bigint;
     close(): void;
     free(): void;
     [Symbol.dispose](): void;

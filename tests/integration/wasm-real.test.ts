@@ -33,7 +33,7 @@ describe('Real WASM: Database basics', () => {
   it('creates a database and returns version', () => {
     const version = Database.version();
     expect(version).toMatch(/^\d+\.\d+\.\d+/);
-    expect(version).toMatch(/^0\.6\.2($|-)/);
+    expect(version).toMatch(/^0\.6\.3($|-)/);
     expect(LiteDatabase.version()).toBe(version);
   });
 

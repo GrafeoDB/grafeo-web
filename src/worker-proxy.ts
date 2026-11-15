@@ -1,9 +1,11 @@
+import { engineOptionsOf } from './engine-options';
 import type {
   BatchEdge,
   CompactReport,
   CreateOptions,
   DatabaseInfo,
   DatabaseSnapshot,
+  ExecuteAsOfOptions,
   ExecuteOptions,
   ImportRowsOptions,
   LpgImportData,
@@ -19,6 +21,7 @@ import type {
   SearchResult,
   StorageStats,
   TextIndexOptions,
+  TimePoint,
   TextSearchOptions,
   UpsertEdgesOptions,
   UpsertNodesOptions,
@@ -100,11 +103,27 @@ export class WorkerProxy {
       this.pending.clear();
     };
 
-    // Send only serializable options to the worker (Worker instances can't be cloned)
+    // Send only serializable options to the worker (Worker instances and
+    // callbacks can't be cloned)
     const initOptions = options
-      ? { persist: options.persist, persistInterval: options.persistInterval }
+      ? {
+          persist: options.persist,
+          persistInterval: options.persistInterval,
+          ...engineOptionsOf(options),
+        }
       : undefined;
-    await this.send('init', [initOptions]);
+    try {
+      await this.send('init', [initOptions]);
+    } catch (error) {
+      // No database to return: stop a worker this proxy started, or it keeps
+      // its engine loaded with no handle left to end it. A worker the caller
+      // passed in stays theirs.
+      if (!(options?.worker instanceof Worker)) {
+        this.worker?.terminate();
+      }
+      this.worker = null;
+      throw error;
+    }
   }
 
   /** Send a message to the Worker and wait for a response. */
@@ -342,6 +361,22 @@ export class WorkerProxy {
 
   async isTransactionActive(): Promise<boolean> {
     return (await this.send('isTransactionActive')) as boolean;
+  }
+
+  async executeAsOf(
+    query: string,
+    point: TimePoint,
+    options?: ExecuteAsOfOptions,
+  ): Promise<Record<string, unknown>[]> {
+    return (await this.send('executeAsOf', [query, point, options])) as Record<string, unknown>[];
+  }
+
+  async epochAsOf(point: TimePoint): Promise<bigint> {
+    return (await this.send('epochAsOf', [point])) as bigint;
+  }
+
+  async currentEpoch(): Promise<bigint> {
+    return (await this.send('currentEpoch')) as bigint;
   }
 
   async signedExport(key: Uint8Array): Promise<Uint8Array> {

@@ -13,9 +13,10 @@
  */
 import type { Database as DatabaseType } from '@grafeo-db/wasm';
 
+import { engineOptionsOf } from './engine-options';
 import { assertCompactWorks } from './engine-quirks';
 import { PersistenceManager, openPersisted } from './persistence';
-import type { WorkerRequest, WorkerResponse } from './types';
+import type { EngineOptions, ExecuteAsOfOptions, TimePoint, WorkerRequest, WorkerResponse } from './types';
 
 type Engine = typeof import('@grafeo-db/wasm');
 
@@ -43,6 +44,8 @@ function loadEngine(): Promise<Engine> {
 
 let db: DatabaseType | null = null;
 let persistence: PersistenceManager | null = null;
+/** The engine settings from `init`, for every database this worker opens. */
+let engineOptions: EngineOptions | undefined;
 
 function assertWorkerFeature(
   target: DatabaseType,
@@ -98,22 +101,30 @@ async function handleMessage(request: WorkerRequest): Promise<void> {
           db = null;
         }
 
-        const options = args[0] as { persist?: string; persistInterval?: number } | undefined;
+        const options = args[0] as
+          | ({ persist?: string; persistInterval?: number } & EngineOptions)
+          | undefined;
+        // Kept only once the database has opened: a refused setting leaves
+        // no settings or persistence behind for later messages.
+        const nextOptions = engineOptionsOf(options);
+        let nextPersistence: PersistenceManager | null = null;
         if (options?.persist) {
-          persistence = new PersistenceManager(
+          nextPersistence = new PersistenceManager(
             options.persist,
             options.persistInterval,
           );
           db = await openPersisted(
             options.persist,
-            persistence,
+            nextPersistence,
             Database.version(),
-            (snapshot) => Database.importSnapshot(snapshot),
-            () => new Database(),
+            (snapshot) => Database.importSnapshot(snapshot, nextOptions),
+            () => new Database(nextOptions),
           );
         } else {
-          db = new Database();
+          db = new Database(nextOptions);
         }
+        engineOptions = nextOptions;
+        persistence = nextPersistence;
 
         respond(id, true);
         break;
@@ -220,7 +231,7 @@ async function handleMessage(request: WorkerRequest): Promise<void> {
       case 'import': {
         if (!db) throw new Error('Database not initialized');
         const snapshot = args[0] as { data: Uint8Array };
-        const newDb = Database.importSnapshot(snapshot.data);
+        const newDb = Database.importSnapshot(snapshot.data, engineOptions);
         db.free();
         db = newDb;
 
@@ -240,8 +251,10 @@ async function handleMessage(request: WorkerRequest): Promise<void> {
 
       case 'clear': {
         if (!db) throw new Error('Database not initialized');
+        // Open the fresh database first, so a throw leaves the old one in place.
+        const fresh = new Database(engineOptions);
         db.free();
-        db = new Database();
+        db = fresh;
         if (persistence) {
           await persistence.clear();
         }
@@ -582,6 +595,25 @@ async function handleMessage(request: WorkerRequest): Promise<void> {
         break;
       }
 
+      case 'executeAsOf': {
+        if (!db) throw new Error('Database not initialized');
+        const [query, point, options] = args as [string, TimePoint, ExecuteAsOfOptions | undefined];
+        respond(id, db.executeAsOf(query, point, options?.params));
+        break;
+      }
+
+      case 'epochAsOf': {
+        if (!db) throw new Error('Database not initialized');
+        respond(id, db.epochAsOf(args[0] as TimePoint));
+        break;
+      }
+
+      case 'currentEpoch': {
+        if (!db) throw new Error('Database not initialized');
+        respond(id, db.currentEpoch());
+        break;
+      }
+
       case 'signedExport': {
         if (!db) throw new Error('Database not initialized');
         const key = args[0] as Uint8Array;
@@ -592,7 +624,7 @@ async function handleMessage(request: WorkerRequest): Promise<void> {
       case 'signedImport': {
         if (!db) throw new Error('Database not initialized');
         const [data, key] = args as [Uint8Array, Uint8Array];
-        const newDb = Database.importSnapshotSigned(data, key);
+        const newDb = Database.importSnapshotSigned(data, key, engineOptions);
         db.free();
         db = newDb;
         if (persistence && !db!.isTransactionActive()) {

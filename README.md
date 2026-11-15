@@ -129,6 +129,28 @@ Parameters work with all query languages, with `execute()` and `executeRaw()`, a
 | `db.isOpen`                      | Whether the database is still open                                          |
 | `db.close()`                     | Release WASM memory and cleanup                                             |
 
+#### Time Travel
+
+Reads of an earlier state need `historyRetention` in `create()`; history is kept in memory only, so a reload, `import()` or `clear()` starts without it, and a read before that point is refused (`GRAFEO-V001`).
+
+| Method                                    | Description                                                                 |
+| ----------------------------------------- | --------------------------------------------------------------------------- |
+| `db.executeAsOf(query, point, options?)`  | Run a GQL read as the database was at `point`; a write throws               |
+| `db.epochAsOf(point)`                     | The epoch (`bigint`) a point reads at                                       |
+| `db.currentEpoch()`                       | The epoch (`bigint`) of the last commit                                     |
+
+A point is an epoch (`bigint`), a `Date`, or `{ ago: milliseconds }`:
+
+```typescript
+const db = await GrafeoDB.create({ historyRetention: 60 * 60 * 1000 }); // keep one hour
+await db.execute(`INSERT (:User {name: 'Alix'})`);
+const before = await db.currentEpoch();
+await db.execute(`MATCH (u:User) SET u.name = 'Gus'`);
+
+await db.executeAsOf(`MATCH (u:User) RETURN u.name`, before);        // [{ 'u.name': 'Alix' }]
+await db.executeAsOf(`MATCH (u:User) RETURN u.name`, { ago: 5000 }); // as of five seconds ago
+```
+
 #### Persistence & Snapshots
 
 | Method                | Description                        |
@@ -196,8 +218,15 @@ await db.textSearch('Doc', 'body', 'graph', 10, { filters: { city: 'Berlin' } })
   worker?: boolean | Worker;   // Run WASM in a Web Worker (or pass a pre-created Worker)
   persistInterval?: number;    // Debounce interval in ms (default: 1000)
   onPersistError?: (error: Error) => void; // IndexedDB write failures (default: console.error)
+
+  // Engine settings, kept for the database's whole life (reloads, clear(), import()):
+  memoryLimit?: number;        // Bytes the database may hold (default: 768 MiB)
+  pathSearchBudget?: number;   // Bytes one path search may hold (default: a quarter of memoryLimit, at most 256 MiB)
+  historyRetention?: 'off' | 'forever' | number; // History for executeAsOf(), in ms (default: 'off')
 }
 ```
+
+A write past `memoryLimit`, or a variable-length or shortest-path search past `pathSearchBudget`, throws `GRAFEO-S001` and changes nothing. A setting the engine refuses (`memoryLimit: 0`) makes `create()` throw and leaves a persisted database as it was. The lite build takes the same settings.
 
 ### `ExecuteOptions`
 
@@ -227,7 +256,7 @@ Persistence triggers after every query execution (the debounce interval prevents
 
 ### Upgrading
 
-Databases persisted by `@grafeo-db/web` 0.5 and later load without any step on your side; the query changes per release are in the [CHANGELOG](CHANGELOG.md) and Grafeo's [Upgrading to 0.6](https://docs.grafeo.dev/get-started/upgrading/0.6/). A saved database has no way back: 0.5.x cannot read the v5 snapshots 0.6 writes (export with `db.export()` first if a downgrade may be needed), 0.6.0 refuses a snapshot with a named vector index, and 0.6.1 opens a 0.6.2 snapshot without the indexes `CREATE INDEX` holds on a label. A refused snapshot (from a newer Grafeo, or with data the lite build cannot keep) is kept under `<key>__backup` and the database starts empty; open that key with the full build to export it.
+Databases persisted by `@grafeo-db/web` 0.5 and later load without any step on your side; the query changes per release are in the [CHANGELOG](CHANGELOG.md) and Grafeo's [Upgrading to 0.6](https://docs.grafeo.dev/get-started/upgrading/0.6/). A saved database has no way back: 0.5.x cannot read the v5 snapshots 0.6 writes (export with `db.export()` first if a downgrade may be needed), 0.6.0 refuses a snapshot with a named vector index, 0.6.1 opens a 0.6.2 snapshot without the indexes `CREATE INDEX` holds on a label, and 0.6.2 refuses a 0.6.3 snapshot that holds a standalone type a graph type lists. A refused snapshot (from a newer Grafeo, or with data the lite build cannot keep) is kept under `<key>__backup` and the database starts empty; open that key with the full build to export it.
 
 ### Storage Management
 
@@ -418,7 +447,7 @@ Requires WebAssembly, IndexedDB and Web Workers.
 | Constraint       | Limit                                             |
 | ---------------- | ------------------------------------------------- |
 | Database size    | ~500 MB (IndexedDB quota)                         |
-| Memory           | 768 MiB engine limit: writes past it are refused with `GRAFEO-S001`; the browser may impose a lower ceiling |
+| Memory           | 768 MiB by default (`memoryLimit`): writes past it are refused with `GRAFEO-S001`; the browser may impose a lower ceiling. No per-query limit: a large sort or grouping is bound only by `memoryLimit` |
 | Concurrency      | Single writer, multiple readers                   |
 | `changesSince()` | Throws: the WASM engine has no change tracking yet |
 

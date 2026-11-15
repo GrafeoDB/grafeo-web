@@ -1,5 +1,6 @@
 import { Database as WasmDatabase } from '@grafeo-db/wasm';
 
+import { engineOptionsOf } from './engine-options';
 import { assertCompactWorks } from './engine-quirks';
 import { PersistenceManager, openPersisted } from './persistence';
 import { ensureWasmInitialized } from './wasm-init';
@@ -11,6 +12,8 @@ import type {
   CreateOptions,
   DatabaseInfo,
   DatabaseSnapshot,
+  EngineOptions,
+  ExecuteAsOfOptions,
   ExecuteOptions,
   ImportRowsOptions,
   LpgEdge,
@@ -37,6 +40,7 @@ import type {
   StorageStats,
   TextIndexOptions,
   TextSearchOptions,
+  TimePoint,
   UpsertEdgesOptions,
   UpsertNodesOptions,
   UpsertSummary,
@@ -53,6 +57,8 @@ export type {
   CreateOptions,
   DatabaseInfo,
   DatabaseSnapshot,
+  EngineOptions,
+  ExecuteAsOfOptions,
   ExecuteOptions,
   ImportRowsOptions,
   LpgEdge,
@@ -79,6 +85,7 @@ export type {
   StorageStats,
   TextIndexOptions,
   TextSearchOptions,
+  TimePoint,
   UpsertEdgesOptions,
   UpsertNodesOptions,
   UpsertSummary,
@@ -107,16 +114,20 @@ export class GrafeoDB {
   private wasm: WasmDatabase | null;
   private persistence: PersistenceManager | null;
   private proxy: WorkerProxy | null;
+  /** The engine settings from `create()`, for every database this instance opens. */
+  private engineOptions: EngineOptions | undefined;
   private closed = false;
 
   private constructor(
     wasm: WasmDatabase | null,
     persistence: PersistenceManager | null,
     proxy: WorkerProxy | null,
+    engineOptions?: EngineOptions,
   ) {
     this.wasm = wasm;
     this.persistence = persistence;
     this.proxy = proxy;
+    this.engineOptions = engineOptions;
   }
 
   /** Returns the Grafeo WASM engine version (requires main-thread WASM init). */
@@ -145,6 +156,7 @@ export class GrafeoDB {
 
     await ensureWasmInitialized();
 
+    const engineOptions = engineOptionsOf(options);
     let persistence: PersistenceManager | null = null;
     let wasm: WasmDatabase;
 
@@ -158,14 +170,14 @@ export class GrafeoDB {
         options.persist,
         persistence,
         WasmDatabase.version(),
-        (snapshot) => WasmDatabase.importSnapshot(snapshot),
-        () => new WasmDatabase(),
+        (snapshot) => WasmDatabase.importSnapshot(snapshot, engineOptions),
+        () => new WasmDatabase(engineOptions),
       );
     } else {
-      wasm = new WasmDatabase();
+      wasm = new WasmDatabase(engineOptions);
     }
 
-    return new GrafeoDB(wasm, persistence, null);
+    return new GrafeoDB(wasm, persistence, null, engineOptions);
   }
 
   private static async createWithWorker(
@@ -353,7 +365,7 @@ export class GrafeoDB {
     if (this.proxy) {
       return this.proxy.import(snapshot);
     }
-    const newWasm = WasmDatabase.importSnapshot(snapshot.data);
+    const newWasm = WasmDatabase.importSnapshot(snapshot.data, this.engineOptions);
     this.wasm!.free();
     this.wasm = newWasm;
     if (this.persistence && !this.wasm!.isTransactionActive()) {
@@ -368,9 +380,11 @@ export class GrafeoDB {
       return this.proxy.clear();
     }
 
-    // Create a fresh WASM database
+    // Open the fresh WASM database before freeing the old one, so a throw
+    // leaves the instance on a database that still works.
+    const fresh = new WasmDatabase(this.engineOptions);
     this.wasm!.free();
-    this.wasm = new WasmDatabase();
+    this.wasm = fresh;
 
     if (this.persistence) {
       await this.persistence.clear();
@@ -908,6 +922,51 @@ export class GrafeoDB {
   }
 
   /**
+   * Runs a GQL query as the database was at `point` and returns its rows, as
+   * `execute()` does. A query that writes throws. Reads the committed state of
+   * that epoch, also while a transaction is open.
+   *
+   * @param point - An epoch (`bigint`), a `Date`, or `{ ago }` milliseconds.
+   * @throws For a point before the history the database keeps
+   *   (`historyRetention` in `create()`; `'off'` keeps none).
+   */
+  async executeAsOf<T extends Record<string, unknown> = Record<string, unknown>>(
+    query: string,
+    point: TimePoint,
+    options?: ExecuteAsOfOptions,
+  ): Promise<T[]> {
+    this.assertOpen();
+    if (this.proxy) {
+      return this.proxy.executeAsOf(query, point, options) as Promise<T[]>;
+    }
+    return this.wasm!.executeAsOf(query, point, options?.params) as T[];
+  }
+
+  /**
+   * The epoch `point` reads at: the epoch itself (the current one for a
+   * later one), or the last commit at or before a time.
+   *
+   * @throws A `TypeError` for a point that is not a `bigint`, a `Date` or
+   *   `{ ago }`; an error for a point before the history the database keeps.
+   */
+  async epochAsOf(point: TimePoint): Promise<bigint> {
+    this.assertOpen();
+    if (this.proxy) {
+      return this.proxy.epochAsOf(point);
+    }
+    return this.wasm!.epochAsOf(point);
+  }
+
+  /** The epoch of the last commit. */
+  async currentEpoch(): Promise<bigint> {
+    this.assertOpen();
+    if (this.proxy) {
+      return this.proxy.currentEpoch();
+    }
+    return this.wasm!.currentEpoch();
+  }
+
+  /**
    * Exports a tamper-evident snapshot: prefixed with a `GSN1` magic header
    * and an HMAC-SHA256 tag computed with `key`. Restore with `signedImport()`
    * using the same `key`. Recommended whenever snapshots travel through
@@ -931,7 +990,7 @@ export class GrafeoDB {
     if (this.proxy) {
       return this.proxy.signedImport(data, key);
     }
-    const newWasm = WasmDatabase.importSnapshotSigned(data, key);
+    const newWasm = WasmDatabase.importSnapshotSigned(data, key, this.engineOptions);
     this.wasm!.free();
     this.wasm = newWasm;
     if (this.persistence && !this.wasm!.isTransactionActive()) {

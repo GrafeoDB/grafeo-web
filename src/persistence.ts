@@ -192,16 +192,28 @@ export function snapshotFormat(data: Uint8Array): string {
  * none. A snapshot the engine refuses (a format it cannot read, or data its
  * build lacks a feature for) is kept under `<key>__backup` and the database
  * starts fresh, so an upgrade never deletes data the user can still recover.
+ *
+ * `fresh()` runs first, also when there is a snapshot: it applies the engine
+ * settings, so a setting the engine refuses throws here, before the snapshot
+ * is read, and is never taken for an incompatible snapshot.
  */
-export async function openPersisted<T>(
+export async function openPersisted<T extends { free(): void }>(
   key: string,
   persistence: PersistenceManager,
   engineVersion: string,
   open: (snapshot: Uint8Array) => T,
   fresh: () => T,
 ): Promise<T> {
-  const snapshot = await persistence.load();
-  if (!snapshot) return fresh();
+  const empty = fresh();
+  let snapshot: Uint8Array | null;
+  try {
+    snapshot = await persistence.load();
+  } catch (err) {
+    empty.free();
+    throw err;
+  }
+  if (!snapshot) return empty;
+  empty.free();
   try {
     return open(snapshot);
   } catch (err) {

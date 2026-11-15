@@ -51,7 +51,7 @@ describe('worker entry on the real engine', () => {
     expect(answers.map((a) => a.id)).toEqual(ids);
     expect(answers.map((a) => a.error)).toEqual([undefined, undefined, undefined, undefined]);
     expect(answers[2].result).toEqual([{ 'a.name': 'Alix', 'b.name': 'Gus' }]);
-    expect(answers[3].result).toMatch(/^0\.6\.2($|-)/);
+    expect(answers[3].result).toMatch(/^0\.6\.3($|-)/);
     expect((await call('close')).error).toBeUndefined();
   });
 
@@ -135,5 +135,26 @@ describe('worker entry on the real engine', () => {
     expect(overflow.errorInfo).toMatchObject({ gqlStatus: '22003' });
     expect((await call('execute', 'RETURN 10 / 0 AS x')).errorInfo).toMatchObject({ gqlStatus: '22012' });
     await call('close');
+  });
+
+  it('opens with the engine options of init and reads earlier epochs', async () => {
+    expect((await call('init', { memoryLimit: 4 * 1024 * 1024, historyRetention: 'forever' })).result).toBe(true);
+    expect(((await call('memoryUsage')).result as { limit_bytes: number }).limit_bytes).toBe(4 * 1024 * 1024);
+    await call('execute', "INSERT (:Person {name: 'Alix'})");
+    const one = (await call('currentEpoch')).result as bigint;
+    await call('execute', "INSERT (:Person {name: 'Gus'})");
+    expect((await call('executeAsOf', 'MATCH (p:Person) RETURN p.name', one, undefined)).result).toEqual([
+      { 'p.name': 'Alix' },
+    ]);
+    expect((await call('epochAsOf', one + 9n)).result).toBe(one + 1n);
+    expect((await call('epochAsOf', 1)).errorInfo).toMatchObject({ name: 'TypeError' });
+
+    await call('clear');
+    expect(((await call('memoryUsage')).result as { limit_bytes: number }).limit_bytes).toBe(4 * 1024 * 1024);
+    await call('close');
+  });
+
+  it('reports an engine option the engine refuses from init', async () => {
+    expect((await call('init', { memoryLimit: 0 })).error).toBe('memoryLimit must be a positive whole number of bytes');
   });
 });

@@ -2,6 +2,45 @@
 
 All notable changes to `@grafeo-db/web`.
 
+## [0.6.3] - 2026-11-15
+
+Engine settings release: `create()` takes `memoryLimit`, `pathSearchBudget` and `historyRetention`, `executeAsOf()` reads the database as it was at an earlier point, and the engine is Grafeo Core 0.6.3. Results that change on upgrade: a path search over its budget fails with `GRAFEO-S001` instead of `GRAFEO-Q006`, `CLEAR GRAPH` of a missing graph fails unless `SILENT`, a SPARQL `MINUS` after another one or after a sub-SELECT removes its solutions, and RDF data counts in full against the memory limit, so an RDF database reaches it sooner. Databases persisted by 0.6.2 load unchanged.
+
+### Added
+
+- **Engine settings in `create()`**: `memoryLimit`, `pathSearchBudget` and `historyRetention` set the bytes the database may hold, the bytes one path search may hold and the history kept for time travel, in direct, worker, worker-client and lite mode. They hold for the database's whole life (a reload from IndexedDB, `clear()`, `import()` and `signedImport()` included), and a value the engine refuses makes `create()` throw and leaves the persisted database as it is.
+- **Time travel**: `executeAsOf(query, point, { params })` runs a GQL read as the database was at a point (an epoch `bigint`, a `Date` or `{ ago }`), `epochAsOf(point)` gives the epoch a point reads at, and `currentEpoch()` the epoch of the last commit. History is held in memory only, so a reload, `import()` or `clear()` starts without it.
+- **New types**: `EngineOptions`, `TimePoint` and `ExecuteAsOfOptions`.
+
+### Changed
+
+Queries that ran in 0.6.2 and now fail or behave differently, all from Grafeo Core 0.6.3.
+
+- **A path search over its budget fails with `GRAFEO-S001`**: a variable-length or shortest-path search, or a SPARQL property path, that holds more than `pathSearchBudget` (by default a quarter of `memoryLimit`, at most 256 MiB, so 192 MiB) names the budget and its setting; it was `GRAFEO-Q006`.
+- **SPARQL graph operations run inside a transaction**: after `beginTransaction()`, `CREATE`, `DROP`, `CLEAR`, `COPY`, `MOVE` and `ADD` apply at the commit with the transaction's triple updates, and its later statements see them; 0.6.2 refused any SPARQL statement after one with `GRAFEO-T004`.
+- **A standalone type a graph type lists stays in force** ([#764](https://github.com/GrafeoDB/grafeo/issues/764)): a type made with `CREATE NODE TYPE` or `CREATE EDGE TYPE` keeps applying by its label in every graph once a graph type lists it, which reverses 0.6.2 for this case; `DROP NODE TYPE` of it is refused while a graph type lists it.
+- **The plan cache is bounded in bytes**: it holds plans up to a sixty-fourth of `memoryLimit` (12 MiB by default; at least 4 MiB and at most 64 MiB, never more than `memoryLimit`) where it held 1,000 plans whatever their size, and a plan larger than that runs uncached. `memoryUsage().caches.plan_cache_limit_bytes` reports the bound.
+- **RDF data counts in full against the memory limit**: the text of every IRI, literal and blank node is counted and a term repeated across triples is held once, so `memoryUsage().rdf` rises to what the store holds and an RDF database near `memoryLimit` reaches it sooner.
+
+### Fixed
+
+From Grafeo Core 0.6.3, except the last entry.
+
+- **A SPARQL `MINUS` after another `MINUS`, a `VALUES` block or a sub-SELECT removes its solutions**: such a `MINUS` was skipped and kept every solution, so these queries now return fewer rows.
+- **`CLEAR GRAPH` of a missing graph fails unless `SILENT`**, as `DROP GRAPH` does, in a transaction or not; in a transaction, a `CLEAR` no longer makes a missing graph exist until the commit.
+- **Index names across graphs** ([#723](https://github.com/GrafeoDB/grafeo/issues/723)): `DROP INDEX` in one graph keeps the same index name in other graphs, and `SHOW INDEXES` lists only the current graph's indexes.
+- **Label and edge-type names count against the memory limit**: about 41 bytes per label and 27 per edge type were missed.
+- **Plans follow the data**: a cached plan is made again once a count the planner reads doubles or halves by at least 1,000 rows (as after a bulk load into an empty database), and a plan built while the schema changed is not cached.
+- **SQL/PGQ range filters on one-kind columns read the index by range again**, as in 0.6.1.
+- **`MemoryUsage` matches the engine**: in the wrapper, the type now has `limit_bytes`, `query_limit_bytes`, the `buffer_manager` budget and limits, `rdf`, `cdc` and `spill`; its `buffer_manager` was typed `{ total_bytes }`, which the engine never reported.
+
+### Upgrading
+
+- **The engine**: `@grafeo-db/wasm` and `@grafeo-db/wasm-lite` `0.6.3`, pinned to that exact version.
+- **Persisted databases carry over**: 0.6.3 still writes snapshot v5, and the snapshots of 0.5.x and 0.6.x releases load unchanged.
+- **No per-query memory limit in WebAssembly**: Grafeo Core 0.6.3 caps what one statement holds in the builds that spill to disk, and the WebAssembly builds do not spill, so a large sort or grouping is bound only by `memoryLimit`.
+- **Back to 0.6.2**: 0.6.2 opens the snapshots 0.6.3 writes with the same rows and indexes, except one that holds a standalone node or edge type a graph type lists ([#764](https://github.com/GrafeoDB/grafeo/issues/764)): 0.6.2 refuses it (`GRAFEO-X002`), keeps it under `<key>__backup` and starts empty.
+
 ## [0.6.2] - 2026-11-08
 
 Catches up on Grafeo Core 0.6.2. Databases persisted by 0.6.1 load unchanged. A correctness release: a string never equals a number, a null in a pattern finds nothing, an operand of the wrong kind raises `22G12` where 0.6.1 answered null, `importRdf()` now works in the full build, and the engine is a little larger. Some queries now fail or answer differently where 0.6.1 was wrong: see Changed.

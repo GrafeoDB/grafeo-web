@@ -265,6 +265,78 @@ describe('WorkerProxy', () => {
     });
   });
 
+  describe('engine options and time travel', () => {
+    it('sends the engine options with init, and only clonable ones', async () => {
+      const fresh = new WorkerProxy();
+      const init = fresh.init({
+        persist: 'p',
+        memoryLimit: 1024,
+        pathSearchBudget: 512,
+        historyRetention: 60_000,
+        onPersistError: () => {},
+      });
+      const sent = mockWorker.postMessage.mock.calls.at(-1)![0] as { method: string; args: unknown[] };
+      expect(sent.method).toBe('init');
+      expect(sent.args[0]).toEqual({
+        persist: 'p',
+        persistInterval: undefined,
+        memoryLimit: 1024,
+        pathSearchBudget: 512,
+        historyRetention: 60_000,
+      });
+      respondToLast(true);
+      await init;
+      // mockWorker is now the fresh proxy's worker: let afterEach close that one.
+      proxy = fresh;
+    });
+
+    it('stops the worker it started when init fails', async () => {
+      const keep = mockWorker;
+      const fresh = new WorkerProxy();
+      const init = fresh.init({ memoryLimit: 0 });
+      const started = mockWorker;
+      respondToLast(undefined, 'memoryLimit must be a positive whole number of bytes');
+      await expect(init).rejects.toThrow('memoryLimit must be a positive whole number of bytes');
+      expect(started.terminate).toHaveBeenCalledOnce();
+      await expect(fresh.nodeCount()).rejects.toThrow('Worker not initialized');
+      mockWorker = keep;
+    });
+
+    it('leaves a worker the caller passed in running when init fails', async () => {
+      const keep = mockWorker;
+      const own = new (globalThis as unknown as { Worker: new () => MockWorker }).Worker();
+      // init() takes `options.worker instanceof Worker`: the stub's instances are plain objects.
+      Object.setPrototypeOf(own, (globalThis as unknown as { Worker: { prototype: object } }).Worker.prototype);
+      const fresh = new WorkerProxy();
+      const init = fresh.init({ worker: own as unknown as Worker, memoryLimit: 0 });
+      respondToLast(undefined, 'memoryLimit must be a positive whole number of bytes');
+      await expect(init).rejects.toThrow(/memoryLimit/);
+      expect(own.terminate).not.toHaveBeenCalled();
+      mockWorker = keep;
+    });
+
+    it('forwards executeAsOf, epochAsOf and currentEpoch', async () => {
+      const at = new Date(0);
+      const rows = proxy.executeAsOf('MATCH (n) RETURN n', at, { params: { a: 1 } });
+      expect(mockWorker.postMessage.mock.calls.at(-1)![0]).toMatchObject({
+        method: 'executeAsOf',
+        args: ['MATCH (n) RETURN n', at, { params: { a: 1 } }],
+      });
+      respondToLast([{ n: 1 }]);
+      expect(await rows).toEqual([{ n: 1 }]);
+
+      const epoch = proxy.epochAsOf({ ago: 5 });
+      expect(mockWorker.postMessage.mock.calls.at(-1)![0]).toMatchObject({ method: 'epochAsOf', args: [{ ago: 5 }] });
+      respondToLast(3n);
+      expect(await epoch).toBe(3n);
+
+      const current = proxy.currentEpoch();
+      expect(mockWorker.postMessage.mock.calls.at(-1)![0]).toMatchObject({ method: 'currentEpoch', args: [] });
+      respondToLast(4n);
+      expect(await current).toBe(4n);
+    });
+  });
+
   describe('send() without init', () => {
     it('rejects if worker not initialized', async () => {
       const fresh = new WorkerProxy();
