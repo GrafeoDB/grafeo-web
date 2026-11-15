@@ -131,7 +131,7 @@ Parameters work with all query languages, with `execute()` and `executeRaw()`, a
 
 #### Time Travel
 
-Reads of an earlier state need `historyRetention` in `create()`; history is kept in memory only, so a reload, `import()` or `clear()` starts without it.
+Reads of an earlier state need `historyRetention` in `create()`; history is kept in memory only, so a reload, `import()` or `clear()` starts without it, and a read before that point is refused (`GRAFEO-V001`).
 
 | Method                                    | Description                                                                 |
 | ----------------------------------------- | --------------------------------------------------------------------------- |
